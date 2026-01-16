@@ -1,0 +1,19 @@
+[package]
+name = "ocular"
+version = "0.1.0"
+edition = "2021"
+description = "A Linux process monitor similar to GNOME System Monitor"
+authors = ["hilgardt-collab"]
+license = "GPL-3.0"
+
+[dependencies]
+gtk4 = { version = "0.9", features = ["v4_12"] }
+libadwaita = { version = "0.7", features = ["v1_4"] }
+sysinfo = "0.31"
+nvml-wrapper = "0.10"
+cairo-rs = { version = "0.20", features = ["v1_16"] }
+glib = "0.20"
+
+[profile.release]
+opt-level = 3
+lto = true
