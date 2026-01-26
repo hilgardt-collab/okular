@@ -1,5 +1,5 @@
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, DrawingArea, FlowBox, Grid, Label, Orientation, ScrolledWindow, Separator};
+use gtk4::{Box as GtkBox, DrawingArea, DropDown, FlowBox, Grid, Label, Orientation, ScrolledWindow, Separator, StringList};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -294,6 +294,24 @@ impl MetricStats {
     }
 }
 
+/// Graph layout options
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GraphLayout {
+    TwoByFour,  // 2 columns, 4 rows (default)
+    FourByTwo,  // 4 columns, 2 rows
+    OneByEight, // 1 column, 8 rows
+}
+
+impl GraphLayout {
+    fn columns(&self) -> i32 {
+        match self {
+            GraphLayout::TwoByFour => 2,
+            GraphLayout::FourByTwo => 4,
+            GraphLayout::OneByEight => 1,
+        }
+    }
+}
+
 /// Detail view panel showing graphs for a selected process
 pub struct DetailView {
     pub widget: ScrolledWindow,
@@ -305,7 +323,14 @@ pub struct DetailView {
     // CPU core display
     cpu_core_display: CpuCoreDisplay,
     current_pid: RefCell<Option<u32>>,
-    // Graphs (8 total, arranged in 4x2 grid)
+    // Graph grid and sections (for layout switching)
+    #[allow(dead_code)]
+    graph_grid: Grid,
+    #[allow(dead_code)]
+    graph_sections: Vec<GtkBox>,
+    #[allow(dead_code)]
+    current_layout: RefCell<GraphLayout>,
+    // Graphs (8 total)
     cpu_graph: GraphWidget,
     memory_graph: GraphWidget,
     gpu_mem_graph: GraphWidget,
@@ -516,13 +541,27 @@ impl DetailView {
         let cpu_core_display = CpuCoreDisplay::new();
         container.append(&cpu_core_display.container);
 
-        // Separator
-        let sep = Separator::new(Orientation::Horizontal);
-        sep.set_margin_top(4);
-        sep.set_margin_bottom(4);
-        container.append(&sep);
+        // Separator and layout selector
+        let layout_box = GtkBox::new(Orientation::Horizontal, 8);
+        layout_box.set_margin_top(4);
+        layout_box.set_margin_bottom(4);
 
-        // Create graphs (8 total for 4x2 grid)
+        let sep = Separator::new(Orientation::Horizontal);
+        sep.set_hexpand(true);
+        layout_box.append(&sep);
+
+        let layout_label = Label::new(Some("Layout:"));
+        layout_label.add_css_class("dim-label");
+        layout_box.append(&layout_label);
+
+        let layout_options = StringList::new(&["2×4", "4×2", "1×8"]);
+        let layout_dropdown = DropDown::new(Some(layout_options), gtk4::Expression::NONE);
+        layout_dropdown.set_selected(0); // Default to 2x4
+        layout_box.append(&layout_dropdown);
+
+        container.append(&layout_box);
+
+        // Create graphs (8 total)
         let cpu_graph = GraphWidget::new(CPU_COLOR, true, false);
         let memory_graph = GraphWidget::new(MEMORY_COLOR, false, true);
         let gpu_mem_graph = GraphWidget::new(GPU_MEM_COLOR, true, false);
@@ -542,7 +581,28 @@ impl DetailView {
         let net_rx_stats = StatsLabels::new();
         let net_tx_stats = StatsLabels::new();
 
-        // Create 4x2 grid for graphs
+        // Create graph sections
+        let cpu_section = Self::create_graph_section("CPU Usage", &cpu_graph, &cpu_stats);
+        let memory_section = Self::create_graph_section("Memory", &memory_graph, &memory_stats);
+        let gpu_mem_section = Self::create_graph_section("GPU Memory", &gpu_mem_graph, &gpu_mem_stats);
+        let gpu_util_section = Self::create_graph_section("GPU Util", &gpu_util_graph, &gpu_util_stats);
+        let disk_read_section = Self::create_graph_section("Disk Read", &disk_read_graph, &disk_read_stats);
+        let disk_write_section = Self::create_graph_section("Disk Write", &disk_write_graph, &disk_write_stats);
+        let net_rx_section = Self::create_graph_section("Net RX", &net_rx_graph, &net_rx_stats);
+        let net_tx_section = Self::create_graph_section("Net TX", &net_tx_graph, &net_tx_stats);
+
+        let graph_sections = vec![
+            cpu_section,
+            memory_section,
+            gpu_mem_section,
+            gpu_util_section,
+            disk_read_section,
+            disk_write_section,
+            net_rx_section,
+            net_tx_section,
+        ];
+
+        // Create grid for graphs
         let graph_grid = Grid::new();
         graph_grid.set_column_spacing(12);
         graph_grid.set_row_spacing(12);
@@ -550,33 +610,26 @@ impl DetailView {
         graph_grid.set_row_homogeneous(false);
         graph_grid.set_vexpand(true);
 
-        // Row 0: CPU, Memory, GPU Memory, GPU Util
-        let cpu_section = Self::create_graph_section("CPU Usage", &cpu_graph, &cpu_stats);
-        graph_grid.attach(&cpu_section, 0, 0, 1, 1);
-
-        let memory_section = Self::create_graph_section("Memory", &memory_graph, &memory_stats);
-        graph_grid.attach(&memory_section, 1, 0, 1, 1);
-
-        let gpu_mem_section = Self::create_graph_section("GPU Memory", &gpu_mem_graph, &gpu_mem_stats);
-        graph_grid.attach(&gpu_mem_section, 2, 0, 1, 1);
-
-        let gpu_util_section = Self::create_graph_section("GPU Util", &gpu_util_graph, &gpu_util_stats);
-        graph_grid.attach(&gpu_util_section, 3, 0, 1, 1);
-
-        // Row 1: Disk Read, Disk Write, Net RX, Net TX
-        let disk_read_section = Self::create_graph_section("Disk Read", &disk_read_graph, &disk_read_stats);
-        graph_grid.attach(&disk_read_section, 0, 1, 1, 1);
-
-        let disk_write_section = Self::create_graph_section("Disk Write", &disk_write_graph, &disk_write_stats);
-        graph_grid.attach(&disk_write_section, 1, 1, 1, 1);
-
-        let net_rx_section = Self::create_graph_section("Net RX", &net_rx_graph, &net_rx_stats);
-        graph_grid.attach(&net_rx_section, 2, 1, 1, 1);
-
-        let net_tx_section = Self::create_graph_section("Net TX", &net_tx_graph, &net_tx_stats);
-        graph_grid.attach(&net_tx_section, 3, 1, 1, 1);
+        // Arrange in default 2x4 layout
+        let current_layout = RefCell::new(GraphLayout::TwoByFour);
+        Self::arrange_grid(&graph_grid, &graph_sections, GraphLayout::TwoByFour);
 
         container.append(&graph_grid);
+
+        // Connect layout dropdown
+        let graph_grid_clone = graph_grid.clone();
+        let graph_sections_clone: Vec<GtkBox> = graph_sections.iter().map(|s| s.clone()).collect();
+        let current_layout_clone = current_layout.clone();
+        layout_dropdown.connect_selected_notify(move |dropdown| {
+            let layout = match dropdown.selected() {
+                0 => GraphLayout::TwoByFour,
+                1 => GraphLayout::FourByTwo,
+                2 => GraphLayout::OneByEight,
+                _ => GraphLayout::TwoByFour,
+            };
+            *current_layout_clone.borrow_mut() = layout;
+            Self::arrange_grid(&graph_grid_clone, &graph_sections_clone, layout);
+        });
 
         // Wrap in scrolled window
         let scrolled = ScrolledWindow::builder()
@@ -594,6 +647,9 @@ impl DetailView {
             info_labels,
             cpu_core_display,
             current_pid: RefCell::new(None),
+            graph_grid,
+            graph_sections,
+            current_layout,
             cpu_graph,
             memory_graph,
             gpu_mem_graph,
@@ -610,6 +666,21 @@ impl DetailView {
             disk_write_stats,
             net_rx_stats,
             net_tx_stats,
+        }
+    }
+
+    /// Arrange graph sections in the grid according to the layout
+    fn arrange_grid(grid: &Grid, sections: &[GtkBox], layout: GraphLayout) {
+        // Remove all children from grid
+        while let Some(child) = grid.first_child() {
+            grid.remove(&child);
+        }
+
+        let cols = layout.columns();
+        for (i, section) in sections.iter().enumerate() {
+            let col = (i as i32) % cols;
+            let row = (i as i32) / cols;
+            grid.attach(section, col, row, 1, 1);
         }
     }
 
