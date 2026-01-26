@@ -3,8 +3,8 @@
 use gtk4::prelude::*;
 use gtk4::gdk::Display;
 use gtk4::{
-    gio, CheckButton, Dialog, Label, Orientation, ResponseType,
-    ScrolledWindow, Box as GtkBox,
+    gio, CheckButton, Label, Orientation,
+    ScrolledWindow, Box as GtkBox, Button,
 };
 use libadwaita as adw;
 use adw::prelude::*;
@@ -193,26 +193,39 @@ pub fn setup_process_actions(
     widget.insert_action_group("process", Some(&action_group));
 }
 
-/// Show CPU affinity dialog
+/// Show CPU affinity dialog using adw::Window
 fn show_affinity_dialog(parent: &gtk4::Window, pid: u32) {
     let cpu_count = get_cpu_count();
     let current_affinity = get_cpu_affinity(pid).unwrap_or_else(|_| vec![true; cpu_count]);
 
-    let dialog = Dialog::builder()
+    let dialog = adw::Window::builder()
         .title("Set CPU Affinity")
         .transient_for(parent)
         .modal(true)
+        .default_width(300)
+        .default_height(400)
         .build();
 
-    dialog.add_button("Cancel", ResponseType::Cancel);
-    dialog.add_button("Apply", ResponseType::Apply);
+    let main_box = GtkBox::new(Orientation::Vertical, 0);
 
-    let content = dialog.content_area();
+    // Header bar with Cancel/Apply buttons
+    let header = adw::HeaderBar::new();
+
+    let cancel_btn = Button::with_label("Cancel");
+    header.pack_start(&cancel_btn);
+
+    let apply_btn = Button::with_label("Apply");
+    apply_btn.add_css_class("suggested-action");
+    header.pack_end(&apply_btn);
+
+    main_box.append(&header);
+
+    // Content
+    let content = GtkBox::new(Orientation::Vertical, 8);
     content.set_margin_top(12);
     content.set_margin_bottom(12);
     content.set_margin_start(12);
     content.set_margin_end(12);
-    content.set_spacing(8);
 
     let label = Label::new(Some(&format!(
         "Select which CPU cores process {} can run on:",
@@ -224,8 +237,7 @@ fn show_affinity_dialog(parent: &gtk4::Window, pid: u32) {
     let scrolled = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
-        .min_content_height(150)
-        .max_content_height(300)
+        .vexpand(true)
         .build();
 
     let cpu_box = GtkBox::new(Orientation::Vertical, 4);
@@ -244,7 +256,7 @@ fn show_affinity_dialog(parent: &gtk4::Window, pid: u32) {
     let btn_box = GtkBox::new(Orientation::Horizontal, 8);
     btn_box.set_halign(gtk4::Align::Center);
 
-    let select_all = gtk4::Button::with_label("Select All");
+    let select_all = Button::with_label("Select All");
     let checkboxes_clone = checkboxes.clone();
     select_all.connect_clicked(move |_| {
         for cb in checkboxes_clone.borrow().iter() {
@@ -253,7 +265,7 @@ fn show_affinity_dialog(parent: &gtk4::Window, pid: u32) {
     });
     btn_box.append(&select_all);
 
-    let deselect_all = gtk4::Button::with_label("Deselect All");
+    let deselect_all = Button::with_label("Deselect All");
     let checkboxes_clone = checkboxes.clone();
     deselect_all.connect_clicked(move |_| {
         for cb in checkboxes_clone.borrow().iter() {
@@ -263,54 +275,81 @@ fn show_affinity_dialog(parent: &gtk4::Window, pid: u32) {
     btn_box.append(&deselect_all);
 
     content.append(&btn_box);
+    main_box.append(&content);
 
+    dialog.set_content(Some(&main_box));
+
+    // Cancel button closes dialog
+    let dialog_weak = dialog.downgrade();
+    cancel_btn.connect_clicked(move |_| {
+        if let Some(d) = dialog_weak.upgrade() {
+            d.close();
+        }
+    });
+
+    // Apply button
     let checkboxes_clone = checkboxes.clone();
     let parent_weak = parent.downgrade();
-    dialog.connect_response(move |dialog: &Dialog, response| {
-        if response == ResponseType::Apply {
-            let selected_cpus: Vec<usize> = checkboxes_clone
-                .borrow()
-                .iter()
-                .enumerate()
-                .filter(|(_, cb)| cb.is_active())
-                .map(|(i, _)| i)
-                .collect();
+    let dialog_weak = dialog.downgrade();
+    apply_btn.connect_clicked(move |_| {
+        let selected_cpus: Vec<usize> = checkboxes_clone
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, cb)| cb.is_active())
+            .map(|(i, _)| i)
+            .collect();
 
-            if selected_cpus.is_empty() {
-                if let Some(parent) = parent_weak.upgrade() {
-                    show_error(&parent, "Invalid Selection", "You must select at least one CPU.");
-                }
-            } else if let Err(e) = set_cpu_affinity(pid, &selected_cpus) {
-                if let Some(parent) = parent_weak.upgrade() {
-                    show_error(&parent, "Failed to set CPU affinity", &e.to_string());
-                }
+        if selected_cpus.is_empty() {
+            if let Some(parent) = parent_weak.upgrade() {
+                show_error(&parent, "Invalid Selection", "You must select at least one CPU.");
+            }
+        } else if let Err(e) = set_cpu_affinity(pid, &selected_cpus) {
+            if let Some(parent) = parent_weak.upgrade() {
+                show_error(&parent, "Failed to set CPU affinity", &e.to_string());
             }
         }
-        dialog.close();
+
+        if let Some(d) = dialog_weak.upgrade() {
+            d.close();
+        }
     });
 
     dialog.present();
 }
 
-/// Show priority dialog
+/// Show priority dialog using adw::Window
 fn show_priority_dialog(parent: &gtk4::Window, pid: u32) {
     let current_priority = process_actions::get_priority(pid).unwrap_or(0);
 
-    let dialog = Dialog::builder()
+    let dialog = adw::Window::builder()
         .title("Set Process Priority")
         .transient_for(parent)
         .modal(true)
+        .default_width(300)
+        .default_height(350)
         .build();
 
-    dialog.add_button("Cancel", ResponseType::Cancel);
-    dialog.add_button("Apply", ResponseType::Apply);
+    let main_box = GtkBox::new(Orientation::Vertical, 0);
 
-    let content = dialog.content_area();
+    // Header bar with Cancel/Apply buttons
+    let header = adw::HeaderBar::new();
+
+    let cancel_btn = Button::with_label("Cancel");
+    header.pack_start(&cancel_btn);
+
+    let apply_btn = Button::with_label("Apply");
+    apply_btn.add_css_class("suggested-action");
+    header.pack_end(&apply_btn);
+
+    main_box.append(&header);
+
+    // Content
+    let content = GtkBox::new(Orientation::Vertical, 8);
     content.set_margin_top(12);
     content.set_margin_bottom(12);
     content.set_margin_start(12);
     content.set_margin_end(12);
-    content.set_spacing(8);
 
     let label = Label::new(Some(&format!(
         "Current priority (nice value): {}\n\nSelect new priority:",
@@ -350,22 +389,36 @@ fn show_priority_dialog(parent: &gtk4::Window, pid: u32) {
     note.set_wrap(true);
     content.append(&note);
 
+    main_box.append(&content);
+    dialog.set_content(Some(&main_box));
+
+    // Cancel button closes dialog
+    let dialog_weak = dialog.downgrade();
+    cancel_btn.connect_clicked(move |_| {
+        if let Some(d) = dialog_weak.upgrade() {
+            d.close();
+        }
+    });
+
+    // Apply button
     let buttons_clone = buttons.clone();
     let parent_weak = parent.downgrade();
-    dialog.connect_response(move |dialog: &Dialog, response| {
-        if response == ResponseType::Apply {
-            for (radio, priority) in buttons_clone.borrow().iter() {
-                if radio.is_active() {
-                    if let Err(e) = set_priority(pid, *priority) {
-                        if let Some(parent) = parent_weak.upgrade() {
-                            show_error(&parent, "Failed to set priority", &e.to_string());
-                        }
+    let dialog_weak = dialog.downgrade();
+    apply_btn.connect_clicked(move |_| {
+        for (radio, priority) in buttons_clone.borrow().iter() {
+            if radio.is_active() {
+                if let Err(e) = set_priority(pid, *priority) {
+                    if let Some(parent) = parent_weak.upgrade() {
+                        show_error(&parent, "Failed to set priority", &e.to_string());
                     }
-                    break;
                 }
+                break;
             }
         }
-        dialog.close();
+
+        if let Some(d) = dialog_weak.upgrade() {
+            d.close();
+        }
     });
 
     dialog.present();

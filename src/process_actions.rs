@@ -4,44 +4,22 @@ use std::fs;
 use std::io;
 use std::process::Command;
 
-/// Available signals for process termination
+/// Available signals for process management
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     Term,  // SIGTERM (15) - Graceful termination
     Kill,  // SIGKILL (9) - Force kill
     Stop,  // SIGSTOP (19) - Pause process
     Cont,  // SIGCONT (18) - Resume process
-    Hup,   // SIGHUP (1) - Hangup
 }
 
 impl Signal {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Signal::Term => "TERM",
-            Signal::Kill => "KILL",
-            Signal::Stop => "STOP",
-            Signal::Cont => "CONT",
-            Signal::Hup => "HUP",
-        }
-    }
-
-    pub fn number(&self) -> i32 {
+    fn number(&self) -> i32 {
         match self {
             Signal::Term => 15,
             Signal::Kill => 9,
             Signal::Stop => 19,
             Signal::Cont => 18,
-            Signal::Hup => 1,
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self {
-            Signal::Term => "Request graceful termination",
-            Signal::Kill => "Force kill immediately",
-            Signal::Stop => "Pause the process",
-            Signal::Cont => "Resume paused process",
-            Signal::Hup => "Hangup signal",
         }
     }
 }
@@ -200,11 +178,6 @@ pub fn get_priority(pid: u32) -> io::Result<i32> {
     let stat_path = format!("/proc/{}/stat", pid);
     let content = fs::read_to_string(&stat_path)?;
 
-    // Parse stat file - nice value is field 19 (0-indexed 18)
-    // Format: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt
-    //         utime stime cutime cstime priority nice ...
-    let _parts: Vec<&str> = content.split_whitespace().collect();
-
     // Find the closing paren of comm field (which may contain spaces)
     let comm_end = content.find(')').ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "Invalid stat format")
@@ -213,7 +186,7 @@ pub fn get_priority(pid: u32) -> io::Result<i32> {
     let after_comm = &content[comm_end + 1..];
     let fields: Vec<&str> = after_comm.split_whitespace().collect();
 
-    // nice is at index 17 (after comm and state)
+    // nice is at index 16 (after comm and state)
     // state=0, ppid=1, pgrp=2, session=3, tty_nr=4, tpgid=5, flags=6,
     // minflt=7, cminflt=8, majflt=9, cmajflt=10, utime=11, stime=12,
     // cutime=13, cstime=14, priority=15, nice=16
@@ -263,12 +236,4 @@ pub fn get_command_line(pid: u32) -> Option<String> {
 /// Check if a process is still running
 pub fn is_process_running(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{}", pid)).exists()
-}
-
-/// Get the executable path for a process
-pub fn get_executable_path(pid: u32) -> Option<String> {
-    let exe_path = format!("/proc/{}/exe", pid);
-    fs::read_link(&exe_path)
-        .ok()
-        .map(|p| p.to_string_lossy().to_string())
 }

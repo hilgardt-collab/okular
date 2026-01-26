@@ -123,7 +123,8 @@ pub struct ProcessListView {
     column_view: ColumnView,
     /// Flag to indicate we're updating programmatically (to avoid callback recursion)
     pub updating: Rc<RefCell<bool>>,
-    /// Context menu popover
+    /// Context menu popover (kept alive for right-click)
+    #[allow(dead_code)]
     context_menu: PopoverMenu,
 }
 
