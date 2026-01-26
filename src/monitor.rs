@@ -137,7 +137,8 @@ pub struct ProcessHistory {
     pub memory_history: VecDeque<u64>,
     pub disk_read_history: VecDeque<u64>,
     pub disk_write_history: VecDeque<u64>,
-    pub gpu_history: VecDeque<f32>,
+    pub gpu_mem_history: VecDeque<f32>,    // Per-process GPU memory %
+    pub gpu_util_history: VecDeque<f32>,   // System-wide GPU utilization %
     pub net_rx_history: VecDeque<u64>,
     pub net_tx_history: VecDeque<u64>,
 }
@@ -149,7 +150,8 @@ impl ProcessHistory {
         memory: u64,
         disk_read: u64,
         disk_write: u64,
-        gpu: f32,
+        gpu_mem: f32,
+        gpu_util: f32,
         net_rx: u64,
         net_tx: u64,
         max_samples: usize,
@@ -158,7 +160,8 @@ impl ProcessHistory {
         self.memory_history.push_back(memory);
         self.disk_read_history.push_back(disk_read);
         self.disk_write_history.push_back(disk_write);
-        self.gpu_history.push_back(gpu);
+        self.gpu_mem_history.push_back(gpu_mem);
+        self.gpu_util_history.push_back(gpu_util);
         self.net_rx_history.push_back(net_rx);
         self.net_tx_history.push_back(net_tx);
 
@@ -175,8 +178,11 @@ impl ProcessHistory {
         while self.disk_write_history.len() > max_samples {
             self.disk_write_history.pop_front();
         }
-        while self.gpu_history.len() > max_samples {
-            self.gpu_history.pop_front();
+        while self.gpu_mem_history.len() > max_samples {
+            self.gpu_mem_history.pop_front();
+        }
+        while self.gpu_util_history.len() > max_samples {
+            self.gpu_util_history.pop_front();
         }
         while self.net_rx_history.len() > max_samples {
             self.net_rx_history.pop_front();
@@ -200,8 +206,11 @@ impl ProcessHistory {
         while self.disk_write_history.len() > max_samples {
             self.disk_write_history.pop_front();
         }
-        while self.gpu_history.len() > max_samples {
-            self.gpu_history.pop_front();
+        while self.gpu_mem_history.len() > max_samples {
+            self.gpu_mem_history.pop_front();
+        }
+        while self.gpu_util_history.len() > max_samples {
+            self.gpu_util_history.pop_front();
         }
         while self.net_rx_history.len() > max_samples {
             self.net_rx_history.pop_front();
@@ -224,6 +233,8 @@ pub struct SystemMonitor {
     last_net_tx: u64,
     net_rx_rate: u64,
     net_tx_rate: u64,
+    // GPU utilization (system-wide)
+    gpu_utilization: f32,
 }
 
 impl SystemMonitor {
@@ -260,6 +271,7 @@ impl SystemMonitor {
             last_net_tx: net_tx,
             net_rx_rate: 0,
             net_tx_rate: 0,
+            gpu_utilization: 0.0,
         }
     }
 
@@ -296,6 +308,12 @@ impl SystemMonitor {
         self.net_tx_rate
     }
 
+    /// Get current GPU utilization (system-wide, percentage)
+    #[allow(dead_code)]
+    pub fn gpu_utilization(&self) -> f32 {
+        self.gpu_utilization
+    }
+
     /// Refresh process data and return top 150 processes by CPU usage, grouped by TGID
     pub fn refresh(&mut self) -> Vec<ProcessInfo> {
         let refresh_kind = ProcessRefreshKind::new()
@@ -311,7 +329,10 @@ impl SystemMonitor {
         self.last_net_rx = net_rx;
         self.last_net_tx = net_tx;
 
-        // Get GPU utilization per process if available
+        // Update GPU utilization (system-wide)
+        self.gpu_utilization = self.get_gpu_utilization();
+
+        // Get GPU memory usage per process if available
         let gpu_usage = self.get_gpu_process_usage();
 
         // Normalize CPU by dividing by CPU count
@@ -389,6 +410,7 @@ impl SystemMonitor {
         let max_samples = self.max_samples;
         let net_rx = self.net_rx_rate;
         let net_tx = self.net_tx_rate;
+        let gpu_util = self.gpu_utilization;
         for proc in &processes {
             let history = self.process_history.entry(proc.pid).or_default();
             history.add_sample(
@@ -396,8 +418,9 @@ impl SystemMonitor {
                 proc.total_memory(),
                 proc.total_disk_read(),
                 proc.total_disk_write(),
-                proc.total_gpu(),
-                net_rx, // System-wide network for now
+                proc.total_gpu(),    // Per-process GPU memory
+                gpu_util,            // System-wide GPU utilization
+                net_rx,              // System-wide network
                 net_tx,
                 max_samples,
             );
@@ -465,6 +488,28 @@ impl SystemMonitor {
         }
 
         usage
+    }
+
+    /// Get overall GPU utilization (NVIDIA only)
+    fn get_gpu_utilization(&self) -> f32 {
+        if let Some(ref nvml) = self.nvml {
+            if let Ok(device_count) = nvml.device_count() {
+                let mut total_util = 0.0f32;
+                let mut count = 0;
+                for i in 0..device_count {
+                    if let Ok(device) = nvml.device_by_index(i) {
+                        if let Ok(utilization) = device.utilization_rates() {
+                            total_util += utilization.gpu as f32;
+                            count += 1;
+                        }
+                    }
+                }
+                if count > 0 {
+                    return total_util / count as f32;
+                }
+            }
+        }
+        0.0
     }
 }
 

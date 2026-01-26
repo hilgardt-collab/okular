@@ -11,6 +11,7 @@ use crate::context_menu;
 use crate::detail_view::{DetailView, ProcessDetails};
 use crate::monitor::SystemMonitor;
 use crate::process_list::ProcessListView;
+use crate::process_window;
 
 const UPDATE_INTERVAL_MS: u64 = 2000; // 2 seconds
 
@@ -51,6 +52,18 @@ impl OcularWindow {
             move || Some(window_clone.clone().upcast::<gtk4::Window>()),
             monitor_clone,
         );
+
+        // Set up double-click to open process window
+        let window_clone = window.clone();
+        let monitor_clone = monitor.clone();
+        process_list.connect_double_click(move |pid, name| {
+            process_window::open_process_window(
+                &window_clone,
+                pid,
+                &name,
+                monitor_clone.clone(),
+            );
+        });
 
         // Paned view for list and detail
         let paned = Paned::new(Orientation::Horizontal);

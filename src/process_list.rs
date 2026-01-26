@@ -627,4 +627,30 @@ impl ProcessListView {
             .and_then(|obj| obj.downcast::<ProcessObject>().ok())
             .map(|p| (p.pid(), p.name()))
     }
+
+    /// Connect a callback for double-click events
+    pub fn connect_double_click<F>(&self, callback: F)
+    where
+        F: Fn(u32, String) + 'static,
+    {
+        let gesture = GestureClick::new();
+        gesture.set_button(1); // Left click
+
+        let selection = self.selection.clone();
+        gesture.connect_pressed(move |gesture, n_press, _x, _y| {
+            if n_press == 2 {
+                // Double-click detected
+                gesture.set_state(gtk4::EventSequenceState::Claimed);
+
+                if let Some(obj) = selection.selected_item() {
+                    if let Ok(row) = obj.downcast::<TreeListRow>() {
+                        if let Some(proc) = row.item().and_downcast::<ProcessObject>() {
+                            callback(proc.pid(), proc.name());
+                        }
+                    }
+                }
+            }
+        });
+        self.column_view.add_controller(gesture);
+    }
 }
