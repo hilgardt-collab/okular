@@ -1,6 +1,9 @@
-mod monitor;
-mod process_list;
+mod context_menu;
 mod detail_view;
+mod monitor;
+mod process_actions;
+mod process_list;
+mod process_window;
 mod window;
 
 use gtk4::prelude::*;

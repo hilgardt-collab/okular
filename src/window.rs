@@ -7,9 +7,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::context_menu;
+use crate::detail_view::{DetailView, ProcessDetails};
 use crate::monitor::SystemMonitor;
 use crate::process_list::ProcessListView;
-use crate::detail_view::{DetailView, ProcessDetails};
 
 const UPDATE_INTERVAL_MS: u64 = 2000; // 2 seconds
 
@@ -39,6 +40,17 @@ impl OcularWindow {
         // Create views
         let process_list = Rc::new(ProcessListView::new());
         let detail_view = Rc::new(DetailView::new());
+
+        // Set up context menu actions for process list
+        let process_list_clone = process_list.clone();
+        let window_clone = window.clone();
+        let monitor_clone = monitor.clone();
+        context_menu::setup_process_actions(
+            process_list.column_view(),
+            move || process_list_clone.get_selected_process(),
+            move || Some(window_clone.clone().upcast::<gtk4::Window>()),
+            monitor_clone,
+        );
 
         // Paned view for list and detail
         let paned = Paned::new(Orientation::Horizontal);

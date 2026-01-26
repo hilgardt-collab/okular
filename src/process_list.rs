@@ -1,16 +1,16 @@
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::ObjectSubclassIsExt;
 use gtk4::{
-    ColumnView, ColumnViewColumn, ScrolledWindow, SignalListItemFactory,
-    ListItem, Label, SortListModel, CustomSorter, CustomFilter, FilterListModel,
-    SingleSelection, Ordering as GtkOrdering, SortType, TreeExpander, TreeListModel,
-    TreeListRow,
+    ColumnView, ColumnViewColumn, GestureClick, PopoverMenu, ScrolledWindow,
+    SignalListItemFactory, ListItem, Label, SortListModel, CustomSorter, CustomFilter,
+    FilterListModel, SingleSelection, Ordering as GtkOrdering, SortType, TreeExpander,
+    TreeListModel, TreeListRow,
 };
-// SortType is used in create_columns for default sort
 use glib::Object;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::context_menu;
 use crate::monitor::{ProcessInfo, format_bytes};
 
 // GObject subclass to hold process data
@@ -120,10 +120,11 @@ pub struct ProcessListView {
     filter_model: FilterListModel,
     selection: SingleSelection,
     filter_text: Rc<RefCell<String>>,
-    #[allow(dead_code)]
     column_view: ColumnView,
     /// Flag to indicate we're updating programmatically (to avoid callback recursion)
     pub updating: Rc<RefCell<bool>>,
+    /// Context menu popover
+    context_menu: PopoverMenu,
 }
 
 impl ProcessListView {
@@ -189,6 +190,33 @@ impl ProcessListView {
             column_view.sort_by_column(Some(&col), SortType::Descending);
         }
 
+        // Create context menu
+        let menu = context_menu::create_process_menu();
+        let context_menu = PopoverMenu::from_model(Some(&menu));
+        context_menu.set_parent(&column_view);
+        context_menu.set_has_arrow(false);
+
+        // Set up right-click gesture
+        let gesture = GestureClick::new();
+        gesture.set_button(3); // Right click
+
+        let context_menu_weak = context_menu.downgrade();
+        gesture.connect_pressed(move |gesture, _n_press, x, y| {
+            gesture.set_state(gtk4::EventSequenceState::Claimed);
+
+            if let Some(menu) = context_menu_weak.upgrade() {
+                // Position menu at click location
+                menu.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                    x as i32,
+                    y as i32,
+                    1,
+                    1,
+                )));
+                menu.popup();
+            }
+        });
+        column_view.add_controller(gesture);
+
         // Scrolled window
         let scrolled = ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Automatic)
@@ -208,6 +236,7 @@ impl ProcessListView {
             filter_text,
             column_view,
             updating: Rc::new(RefCell::new(false)),
+            context_menu,
         }
     }
 
@@ -581,5 +610,20 @@ impl ProcessListView {
     /// Get the selection model for connecting signals
     pub fn selection_model(&self) -> &SingleSelection {
         &self.selection
+    }
+
+    /// Get the column view widget for adding action groups
+    pub fn column_view(&self) -> &ColumnView {
+        &self.column_view
+    }
+
+    /// Get the currently selected process (pid, name)
+    pub fn get_selected_process(&self) -> Option<(u32, String)> {
+        self.selection
+            .selected_item()
+            .and_then(|obj| obj.downcast::<TreeListRow>().ok())
+            .and_then(|row| row.item())
+            .and_then(|obj| obj.downcast::<ProcessObject>().ok())
+            .map(|p| (p.pid(), p.name()))
     }
 }
