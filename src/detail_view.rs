@@ -1,9 +1,10 @@
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, DrawingArea, Label, Orientation, ScrolledWindow, Separator};
+use gtk4::{Box as GtkBox, DrawingArea, FlowBox, Label, Orientation, ScrolledWindow, Separator};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::monitor::{ProcessHistory, format_bytes};
+use crate::process_actions::{get_cpu_core_info, get_thread_cpu_info, CoreType};
 
 /// Colors for the graphs
 const CPU_COLOR: (f64, f64, f64) = (0.204, 0.396, 0.643); // Blue
@@ -297,6 +298,9 @@ pub struct DetailView {
     // Process info section
     title_label: Label,
     info_labels: ProcessInfoLabels,
+    // CPU core display
+    cpu_core_display: CpuCoreDisplay,
+    current_pid: RefCell<Option<u32>>,
     // Graphs
     cpu_graph: GraphWidget,
     memory_graph: GraphWidget,
@@ -314,6 +318,110 @@ struct ProcessInfoLabels {
     threads: Label,
     state: Label,
     user: Label,
+}
+
+/// Visual display of CPU cores showing thread distribution
+struct CpuCoreDisplay {
+    container: GtkBox,
+    #[allow(dead_code)]
+    flow_box: FlowBox,
+    core_labels: Vec<(Label, Label)>, // (core label, thread count label)
+}
+
+impl CpuCoreDisplay {
+    fn new() -> Self {
+        let container = GtkBox::new(Orientation::Vertical, 4);
+
+        let header = Label::new(Some("Thread CPU Distribution"));
+        header.add_css_class("heading");
+        header.set_halign(gtk4::Align::Start);
+        container.append(&header);
+
+        let flow_box = FlowBox::new();
+        flow_box.set_homogeneous(false);
+        flow_box.set_selection_mode(gtk4::SelectionMode::None);
+        flow_box.set_min_children_per_line(4);
+        flow_box.set_max_children_per_line(16);
+        flow_box.set_column_spacing(4);
+        flow_box.set_row_spacing(4);
+
+        // Create core widgets based on system CPU count
+        let core_info = get_cpu_core_info();
+        let mut core_labels = Vec::with_capacity(core_info.len());
+
+        for info in &core_info {
+            let core_box = GtkBox::new(Orientation::Vertical, 2);
+            core_box.set_margin_start(2);
+            core_box.set_margin_end(2);
+            core_box.set_margin_top(2);
+            core_box.set_margin_bottom(2);
+            core_box.add_css_class("card");
+            core_box.set_size_request(48, 48);
+
+            // Core ID label with type indicator
+            let core_text = if info.core_type != CoreType::Standard {
+                format!("{}:{}", info.cpu_id, info.core_type.label())
+            } else {
+                format!("{}", info.cpu_id)
+            };
+            let core_label = Label::new(Some(&core_text));
+            core_label.add_css_class("caption");
+            if let Some(css_class) = info.core_type.css_class() {
+                core_label.add_css_class(css_class);
+            }
+
+            // Thread count label
+            let count_label = Label::new(Some("-"));
+            count_label.add_css_class("title-4");
+
+            core_box.append(&core_label);
+            core_box.append(&count_label);
+
+            flow_box.append(&core_box);
+            core_labels.push((core_label, count_label));
+        }
+
+        container.append(&flow_box);
+
+        Self {
+            container,
+            flow_box,
+            core_labels,
+        }
+    }
+
+    fn update(&self, pid: u32) {
+        let threads = get_thread_cpu_info(pid);
+
+        // Count threads per CPU
+        let mut cpu_counts = vec![0usize; self.core_labels.len()];
+        for thread in &threads {
+            if let Some(cpu) = thread.current_cpu {
+                if cpu < cpu_counts.len() {
+                    cpu_counts[cpu] += 1;
+                }
+            }
+        }
+
+        // Update labels
+        for (i, (_, count_label)) in self.core_labels.iter().enumerate() {
+            let count = cpu_counts.get(i).copied().unwrap_or(0);
+            if count > 0 {
+                count_label.set_label(&count.to_string());
+                count_label.remove_css_class("dim-label");
+            } else {
+                count_label.set_label("-");
+                count_label.add_css_class("dim-label");
+            }
+        }
+    }
+
+    fn clear(&self) {
+        for (_, count_label) in &self.core_labels {
+            count_label.set_label("-");
+            count_label.add_css_class("dim-label");
+        }
+    }
 }
 
 struct StatsLabels {
@@ -392,6 +500,10 @@ impl DetailView {
         };
         container.append(&info_box);
 
+        // CPU core display showing thread distribution
+        let cpu_core_display = CpuCoreDisplay::new();
+        container.append(&cpu_core_display.container);
+
         // Separator
         let sep = Separator::new(Orientation::Horizontal);
         sep.set_margin_top(4);
@@ -440,6 +552,8 @@ impl DetailView {
             container,
             title_label,
             info_labels,
+            cpu_core_display,
+            current_pid: RefCell::new(None),
             cpu_graph,
             memory_graph,
             disk_read_graph,
@@ -525,6 +639,7 @@ impl DetailView {
     /// Update the detail view for a process
     pub fn update(&self, name: &str, pid: u32, history: Option<&ProcessHistory>, process_info: Option<&ProcessDetails>) {
         self.title_label.set_label(&format!("{} (PID: {})", name, pid));
+        *self.current_pid.borrow_mut() = Some(pid);
 
         // Update process info
         if let Some(info) = process_info {
@@ -540,6 +655,9 @@ impl DetailView {
             self.info_labels.state.set_label("-");
             self.info_labels.user.set_label("-");
         }
+
+        // Update CPU core display showing thread distribution
+        self.cpu_core_display.update(pid);
 
         if let Some(history) = history {
             let num_samples = history.cpu_history.len().max(1);
@@ -580,11 +698,15 @@ impl DetailView {
     /// Clear the detail view
     pub fn clear(&self) {
         self.title_label.set_label("Select a process");
+        *self.current_pid.borrow_mut() = None;
+
         self.info_labels.command.set_label("-");
         self.info_labels.command.set_tooltip_text(None);
         self.info_labels.threads.set_label("-");
         self.info_labels.state.set_label("-");
         self.info_labels.user.set_label("-");
+
+        self.cpu_core_display.clear();
 
         self.cpu_graph.update(&[], 60, 2);
         self.memory_graph.update(&[], 60, 2);

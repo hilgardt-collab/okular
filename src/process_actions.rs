@@ -238,6 +238,79 @@ pub fn is_process_running(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{}", pid)).exists()
 }
 
+/// Information about a thread's CPU assignment
+#[derive(Debug, Clone)]
+pub struct ThreadCpuInfo {
+    pub tid: u32,
+    #[allow(dead_code)] // Available for tooltip/expanded view
+    pub name: String,
+    pub current_cpu: Option<usize>,
+}
+
+/// Get CPU information for all threads of a process
+/// Returns a list of threads with their current CPU assignments
+pub fn get_thread_cpu_info(pid: u32) -> Vec<ThreadCpuInfo> {
+    let task_dir = format!("/proc/{}/task", pid);
+    let mut threads = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&task_dir) {
+        for entry in entries.flatten() {
+            if let Ok(tid) = entry.file_name().to_string_lossy().parse::<u32>() {
+                let stat_path = format!("/proc/{}/task/{}/stat", pid, tid);
+                if let Ok(content) = fs::read_to_string(&stat_path) {
+                    let (name, cpu) = parse_stat_for_cpu(&content);
+                    threads.push(ThreadCpuInfo {
+                        tid,
+                        name,
+                        current_cpu: cpu,
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by TID (main thread first)
+    threads.sort_by_key(|t| t.tid);
+    threads
+}
+
+/// Parse /proc/[pid]/stat or /proc/[pid]/task/[tid]/stat for CPU and name
+/// Returns (comm, processor) where processor is field 39 (0-indexed: 38)
+fn parse_stat_for_cpu(content: &str) -> (String, Option<usize>) {
+    // Format: pid (comm) state ppid pgrp session tty_nr tpgid flags ...
+    // The comm field can contain spaces and parentheses, so find it by parens
+    let comm_start = content.find('(').unwrap_or(0);
+    let comm_end = content.rfind(')').unwrap_or(content.len());
+
+    let name = if comm_start < comm_end {
+        content[comm_start + 1..comm_end].to_string()
+    } else {
+        "unknown".to_string()
+    };
+
+    // Fields after comm: state is index 0, then ppid(1), pgrp(2), ... processor(36)
+    // processor is at position 38 counting from pid (0-indexed)
+    // After the closing paren, we have: state ppid pgrp session tty_nr tpgid flags
+    // minflt cminflt majflt cmajflt utime stime cutime cstime priority nice
+    // num_threads itrealvalue starttime vsize rss rsslim startcode endcode
+    // startstack kstkesp kstkeip signal blocked sigignore sigcatch wchan
+    // nswap cnswap exit_signal processor ...
+    let after_comm = &content[comm_end + 1..];
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+
+    // processor is field index 36 after (state which is index 0)
+    // state=0, ppid=1, pgrp=2, session=3, tty_nr=4, tpgid=5, flags=6,
+    // minflt=7, cminflt=8, majflt=9, cmajflt=10, utime=11, stime=12,
+    // cutime=13, cstime=14, priority=15, nice=16, num_threads=17,
+    // itrealvalue=18, starttime=19, vsize=20, rss=21, rsslim=22,
+    // startcode=23, endcode=24, startstack=25, kstkesp=26, kstkeip=27,
+    // signal=28, blocked=29, sigignore=30, sigcatch=31, wchan=32,
+    // nswap=33, cnswap=34, exit_signal=35, processor=36
+    let cpu = fields.get(36).and_then(|s| s.parse().ok());
+
+    (name, cpu)
+}
+
 /// CPU core type information
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreType {
