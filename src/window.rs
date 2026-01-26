@@ -22,7 +22,7 @@ impl OcularWindow {
         // Create window
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Ocular - Process Monitor")
+            .title("okular")
             .default_width(1200)
             .default_height(700)
             .build();

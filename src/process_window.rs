@@ -29,7 +29,7 @@ pub fn open_process_window(
     monitor: Rc<RefCell<SystemMonitor>>,
 ) {
     let window = adw::Window::builder()
-        .title(&format!("{} (PID: {}) - Ocular", name, pid))
+        .title(&format!("{} (PID: {}) - okular", name, pid))
         .default_width(600)
         .default_height(700)
         .transient_for(parent)
