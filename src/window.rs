@@ -16,7 +16,8 @@ const UPDATE_INTERVAL_MS: u64 = 2000; // 2 seconds
 pub struct OcularWindow;
 
 impl OcularWindow {
-    pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
+    /// Build and return the main application window
+    pub fn build(app: &adw::Application) -> adw::ApplicationWindow {
         // Create window
         let window = adw::ApplicationWindow::builder()
             .application(app)
@@ -83,7 +84,10 @@ impl OcularWindow {
                 2 => 150,  // 5 min
                 3 => 300,  // 10 min
                 4 => 900,  // 30 min
-                _ => 60,
+                _ => {
+                    eprintln!("Warning: Unexpected dropdown index {}, defaulting to 2 min", idx);
+                    60
+                }
             };
             monitor_clone.borrow_mut().set_max_samples(max_samples);
         });
@@ -149,7 +153,9 @@ impl OcularWindow {
                     let history = mon.get_history(pid);
                     detail_view_clone.update(&proc.name, pid, history);
                 } else {
-                    // Process no longer exists
+                    // Process no longer exists - clear selection
+                    #[cfg(debug_assertions)]
+                    eprintln!("Debug: Selected process (PID {}) no longer exists", pid);
                     *selected_pid_clone.borrow_mut() = None;
                     detail_view_clone.clear();
                 }

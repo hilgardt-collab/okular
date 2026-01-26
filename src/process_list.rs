@@ -184,7 +184,8 @@ impl ProcessListView {
 
         // Set default sort to CPU descending
         if let Some(col) = column_view.columns().item(2) {
-            let col = col.downcast::<ColumnViewColumn>().unwrap();
+            let col = col.downcast::<ColumnViewColumn>()
+                .expect("Column 2 should be a ColumnViewColumn");
             column_view.sort_by_column(Some(&col), SortType::Descending);
         }
 
@@ -214,7 +215,8 @@ impl ProcessListView {
         // Name column with tree expander
         let factory = SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
             let expander = TreeExpander::new();
             let label = Label::new(None);
             label.set_halign(gtk4::Align::Start);
@@ -223,30 +225,40 @@ impl ProcessListView {
             item.set_child(Some(&expander));
         });
         factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
-            let expander = item.child().and_downcast::<TreeExpander>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
+            let expander = item.child().and_downcast::<TreeExpander>()
+                .expect("Item child should be a TreeExpander");
 
             // Get the TreeListRow
-            let row = item.item().and_downcast::<TreeListRow>().unwrap();
+            let row = item.item().and_downcast::<TreeListRow>()
+                .expect("Item should contain a TreeListRow");
             expander.set_list_row(Some(&row));
 
             // Get the actual ProcessObject from the row
-            let obj = row.item().and_downcast::<ProcessObject>().unwrap();
-            let label = expander.child().and_downcast::<Label>().unwrap();
+            let obj = row.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let label = expander.child().and_downcast::<Label>()
+                .expect("Expander child should be a Label");
 
             let name = obj.name();
             let child_count = obj.child_count();
             if child_count > 0 {
-                label.set_label(&format!("{} ({})", name, child_count + 1));
+                // Show child/thread count in parentheses
+                label.set_label(&format!("{} (+{})", name, child_count));
             } else {
                 label.set_label(&name);
             }
         });
         let sorter = CustomSorter::new(|a, b| {
-            let row_a = a.downcast_ref::<TreeListRow>().unwrap();
-            let row_b = b.downcast_ref::<TreeListRow>().unwrap();
-            let a = row_a.item().and_downcast::<ProcessObject>().unwrap();
-            let b = row_b.item().and_downcast::<ProcessObject>().unwrap();
+            let row_a = a.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let row_b = b.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let a = row_a.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let b = row_b.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
             match a.name().to_lowercase().cmp(&b.name().to_lowercase()) {
                 std::cmp::Ordering::Less => GtkOrdering::Smaller,
                 std::cmp::Ordering::Equal => GtkOrdering::Equal,
@@ -262,23 +274,32 @@ impl ProcessListView {
         // PID column
         let factory = SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
             let label = Label::new(None);
             label.set_halign(gtk4::Align::End);
             item.set_child(Some(&label));
         });
         factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
-            let row = item.item().and_downcast::<TreeListRow>().unwrap();
-            let obj = row.item().and_downcast::<ProcessObject>().unwrap();
-            let label = item.child().and_downcast::<Label>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
+            let row = item.item().and_downcast::<TreeListRow>()
+                .expect("Item should contain a TreeListRow");
+            let obj = row.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let label = item.child().and_downcast::<Label>()
+                .expect("Item child should be a Label");
             label.set_label(&obj.pid().to_string());
         });
         let sorter = CustomSorter::new(|a, b| {
-            let row_a = a.downcast_ref::<TreeListRow>().unwrap();
-            let row_b = b.downcast_ref::<TreeListRow>().unwrap();
-            let a = row_a.item().and_downcast::<ProcessObject>().unwrap();
-            let b = row_b.item().and_downcast::<ProcessObject>().unwrap();
+            let row_a = a.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let row_b = b.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let a = row_a.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let b = row_b.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
             match a.pid().cmp(&b.pid()) {
                 std::cmp::Ordering::Less => GtkOrdering::Smaller,
                 std::cmp::Ordering::Equal => GtkOrdering::Equal,
@@ -294,27 +315,47 @@ impl ProcessListView {
         // CPU% column
         let factory = SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
             let label = Label::new(None);
             label.set_halign(gtk4::Align::End);
             item.set_child(Some(&label));
         });
         factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
-            let row = item.item().and_downcast::<TreeListRow>().unwrap();
-            let obj = row.item().and_downcast::<ProcessObject>().unwrap();
-            let label = item.child().and_downcast::<Label>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
+            let row = item.item().and_downcast::<TreeListRow>()
+                .expect("Item should contain a TreeListRow");
+            let obj = row.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let label = item.child().and_downcast::<Label>()
+                .expect("Item child should be a Label");
             label.set_label(&format!("{:.1}%", obj.cpu_percent()));
         });
         let sorter = CustomSorter::new(|a, b| {
-            let row_a = a.downcast_ref::<TreeListRow>().unwrap();
-            let row_b = b.downcast_ref::<TreeListRow>().unwrap();
-            let a = row_a.item().and_downcast::<ProcessObject>().unwrap();
-            let b = row_b.item().and_downcast::<ProcessObject>().unwrap();
-            match a.cpu_percent().partial_cmp(&b.cpu_percent()).unwrap_or(std::cmp::Ordering::Equal) {
-                std::cmp::Ordering::Less => GtkOrdering::Smaller,
-                std::cmp::Ordering::Equal => GtkOrdering::Equal,
-                std::cmp::Ordering::Greater => GtkOrdering::Larger,
+            let row_a = a.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let row_b = b.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let a = row_a.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let b = row_b.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            // Handle NaN by treating it as less than any valid number
+            let a_cpu = a.cpu_percent();
+            let b_cpu = b.cpu_percent();
+            if a_cpu.is_nan() && b_cpu.is_nan() {
+                GtkOrdering::Equal
+            } else if a_cpu.is_nan() {
+                GtkOrdering::Smaller
+            } else if b_cpu.is_nan() {
+                GtkOrdering::Larger
+            } else {
+                match a_cpu.partial_cmp(&b_cpu).unwrap_or(std::cmp::Ordering::Equal) {
+                    std::cmp::Ordering::Less => GtkOrdering::Smaller,
+                    std::cmp::Ordering::Equal => GtkOrdering::Equal,
+                    std::cmp::Ordering::Greater => GtkOrdering::Larger,
+                }
             }
         });
         let col = ColumnViewColumn::new(Some("CPU %"), Some(factory));
@@ -326,23 +367,32 @@ impl ProcessListView {
         // Memory column
         let factory = SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
             let label = Label::new(None);
             label.set_halign(gtk4::Align::End);
             item.set_child(Some(&label));
         });
         factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
-            let row = item.item().and_downcast::<TreeListRow>().unwrap();
-            let obj = row.item().and_downcast::<ProcessObject>().unwrap();
-            let label = item.child().and_downcast::<Label>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
+            let row = item.item().and_downcast::<TreeListRow>()
+                .expect("Item should contain a TreeListRow");
+            let obj = row.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let label = item.child().and_downcast::<Label>()
+                .expect("Item child should be a Label");
             label.set_label(&format_bytes(obj.memory_bytes()));
         });
         let sorter = CustomSorter::new(|a, b| {
-            let row_a = a.downcast_ref::<TreeListRow>().unwrap();
-            let row_b = b.downcast_ref::<TreeListRow>().unwrap();
-            let a = row_a.item().and_downcast::<ProcessObject>().unwrap();
-            let b = row_b.item().and_downcast::<ProcessObject>().unwrap();
+            let row_a = a.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let row_b = b.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let a = row_a.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let b = row_b.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
             match a.memory_bytes().cmp(&b.memory_bytes()) {
                 std::cmp::Ordering::Less => GtkOrdering::Smaller,
                 std::cmp::Ordering::Equal => GtkOrdering::Equal,
@@ -358,24 +408,33 @@ impl ProcessListView {
         // Disk I/O column
         let factory = SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
             let label = Label::new(None);
             label.set_halign(gtk4::Align::End);
             item.set_child(Some(&label));
         });
         factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
-            let row = item.item().and_downcast::<TreeListRow>().unwrap();
-            let obj = row.item().and_downcast::<ProcessObject>().unwrap();
-            let label = item.child().and_downcast::<Label>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
+            let row = item.item().and_downcast::<TreeListRow>()
+                .expect("Item should contain a TreeListRow");
+            let obj = row.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let label = item.child().and_downcast::<Label>()
+                .expect("Item child should be a Label");
             let total = obj.disk_read_bytes() + obj.disk_write_bytes();
             label.set_label(&format_bytes(total));
         });
         let sorter = CustomSorter::new(|a, b| {
-            let row_a = a.downcast_ref::<TreeListRow>().unwrap();
-            let row_b = b.downcast_ref::<TreeListRow>().unwrap();
-            let a = row_a.item().and_downcast::<ProcessObject>().unwrap();
-            let b = row_b.item().and_downcast::<ProcessObject>().unwrap();
+            let row_a = a.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let row_b = b.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let a = row_a.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let b = row_b.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
             let a_total = a.disk_read_bytes() + a.disk_write_bytes();
             let b_total = b.disk_read_bytes() + b.disk_write_bytes();
             match a_total.cmp(&b_total) {
@@ -393,16 +452,21 @@ impl ProcessListView {
         // GPU% column
         let factory = SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
             let label = Label::new(None);
             label.set_halign(gtk4::Align::End);
             item.set_child(Some(&label));
         });
         factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<ListItem>().unwrap();
-            let row = item.item().and_downcast::<TreeListRow>().unwrap();
-            let obj = row.item().and_downcast::<ProcessObject>().unwrap();
-            let label = item.child().and_downcast::<Label>().unwrap();
+            let item = item.downcast_ref::<ListItem>()
+                .expect("Factory item should be a ListItem");
+            let row = item.item().and_downcast::<TreeListRow>()
+                .expect("Item should contain a TreeListRow");
+            let obj = row.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let label = item.child().and_downcast::<Label>()
+                .expect("Item child should be a Label");
             let gpu = obj.gpu_percent();
             if gpu < 0.0 {
                 label.set_label("-");
@@ -411,14 +475,29 @@ impl ProcessListView {
             }
         });
         let sorter = CustomSorter::new(|a, b| {
-            let row_a = a.downcast_ref::<TreeListRow>().unwrap();
-            let row_b = b.downcast_ref::<TreeListRow>().unwrap();
-            let a = row_a.item().and_downcast::<ProcessObject>().unwrap();
-            let b = row_b.item().and_downcast::<ProcessObject>().unwrap();
-            match a.gpu_percent().partial_cmp(&b.gpu_percent()).unwrap_or(std::cmp::Ordering::Equal) {
-                std::cmp::Ordering::Less => GtkOrdering::Smaller,
-                std::cmp::Ordering::Equal => GtkOrdering::Equal,
-                std::cmp::Ordering::Greater => GtkOrdering::Larger,
+            let row_a = a.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let row_b = b.downcast_ref::<TreeListRow>()
+                .expect("Sorter item should be a TreeListRow");
+            let a = row_a.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            let b = row_b.item().and_downcast::<ProcessObject>()
+                .expect("Row should contain a ProcessObject");
+            // Handle NaN and negative values (used for N/A)
+            let a_gpu = a.gpu_percent();
+            let b_gpu = b.gpu_percent();
+            if (a_gpu.is_nan() || a_gpu < 0.0) && (b_gpu.is_nan() || b_gpu < 0.0) {
+                GtkOrdering::Equal
+            } else if a_gpu.is_nan() || a_gpu < 0.0 {
+                GtkOrdering::Smaller
+            } else if b_gpu.is_nan() || b_gpu < 0.0 {
+                GtkOrdering::Larger
+            } else {
+                match a_gpu.partial_cmp(&b_gpu).unwrap_or(std::cmp::Ordering::Equal) {
+                    std::cmp::Ordering::Less => GtkOrdering::Smaller,
+                    std::cmp::Ordering::Equal => GtkOrdering::Equal,
+                    std::cmp::Ordering::Greater => GtkOrdering::Larger,
+                }
             }
         });
         let col = ColumnViewColumn::new(Some("GPU %"), Some(factory));
@@ -459,7 +538,9 @@ impl ProcessListView {
     /// Select a process by PID
     pub fn select_by_pid(&self, pid: u32) {
         // Search through the model to find the item
-        let model = self.selection.model().unwrap();
+        let Some(model) = self.selection.model() else {
+            return; // No model available, nothing to select
+        };
         for i in 0..model.n_items() {
             if let Some(obj) = model.item(i) {
                 if let Some(row) = obj.downcast_ref::<TreeListRow>() {

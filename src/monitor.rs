@@ -1,5 +1,5 @@
 use sysinfo::{System, ProcessesToUpdate, ProcessRefreshKind};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// Represents a single process with its resource usage
 #[derive(Debug, Clone)]
@@ -29,13 +29,19 @@ impl ProcessInfo {
         self.memory_bytes
     }
 
+    /// Get total disk read including children
+    pub fn total_disk_read(&self) -> u64 {
+        self.disk_read_bytes + self.children.iter().map(|c| c.disk_read_bytes).sum::<u64>()
+    }
+
+    /// Get total disk write including children
+    pub fn total_disk_write(&self) -> u64 {
+        self.disk_write_bytes + self.children.iter().map(|c| c.disk_write_bytes).sum::<u64>()
+    }
+
     /// Get total disk I/O including children
     pub fn total_disk_io(&self) -> u64 {
-        let self_total = self.disk_read_bytes + self.disk_write_bytes;
-        let children_total: u64 = self.children.iter()
-            .map(|c| c.disk_read_bytes + c.disk_write_bytes)
-            .sum();
-        self_total + children_total
+        self.total_disk_read() + self.total_disk_write()
     }
 
     /// Get child count
@@ -47,51 +53,47 @@ impl ProcessInfo {
 /// History entry for graphing
 #[derive(Debug, Clone, Default)]
 pub struct ProcessHistory {
-    pub cpu_history: Vec<f32>,
-    pub memory_history: Vec<u64>,
-    pub disk_read_history: Vec<u64>,
-    pub disk_write_history: Vec<u64>,
+    pub cpu_history: VecDeque<f32>,
+    pub memory_history: VecDeque<u64>,
+    pub disk_read_history: VecDeque<u64>,
+    pub disk_write_history: VecDeque<u64>,
 }
 
 impl ProcessHistory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn add_sample(&mut self, cpu: f32, memory: u64, disk_read: u64, disk_write: u64, max_samples: usize) {
-        self.cpu_history.push(cpu);
-        self.memory_history.push(memory);
-        self.disk_read_history.push(disk_read);
-        self.disk_write_history.push(disk_write);
+        self.cpu_history.push_back(cpu);
+        self.memory_history.push_back(memory);
+        self.disk_read_history.push_back(disk_read);
+        self.disk_write_history.push_back(disk_write);
 
-        // Keep only the last max_samples
+        // Keep only the last max_samples - O(1) pop_front instead of O(n) remove(0)
         while self.cpu_history.len() > max_samples {
-            self.cpu_history.remove(0);
+            self.cpu_history.pop_front();
         }
         while self.memory_history.len() > max_samples {
-            self.memory_history.remove(0);
+            self.memory_history.pop_front();
         }
         while self.disk_read_history.len() > max_samples {
-            self.disk_read_history.remove(0);
+            self.disk_read_history.pop_front();
         }
         while self.disk_write_history.len() > max_samples {
-            self.disk_write_history.remove(0);
+            self.disk_write_history.pop_front();
         }
     }
 
     /// Trim history to new max samples
     pub fn trim_to(&mut self, max_samples: usize) {
         while self.cpu_history.len() > max_samples {
-            self.cpu_history.remove(0);
+            self.cpu_history.pop_front();
         }
         while self.memory_history.len() > max_samples {
-            self.memory_history.remove(0);
+            self.memory_history.pop_front();
         }
         while self.disk_read_history.len() > max_samples {
-            self.disk_read_history.remove(0);
+            self.disk_read_history.pop_front();
         }
         while self.disk_write_history.len() > max_samples {
-            self.disk_write_history.remove(0);
+            self.disk_write_history.pop_front();
         }
     }
 }
@@ -211,26 +213,26 @@ impl SystemMonitor {
             }
         }
 
-        // Third pass: build the grouped structure
-        for (pid, (mut proc_info, _parent_pid)) in all_processes.clone() {
+        // Third pass: collect children for each parent
+        let mut parent_to_children: HashMap<u32, Vec<ProcessInfo>> = HashMap::new();
+        for child_pid in &children_pids {
+            if let Some((child_info, Some(parent))) = all_processes.get(child_pid) {
+                parent_to_children
+                    .entry(*parent)
+                    .or_default()
+                    .push(child_info.clone());
+            }
+        }
+
+        // Fourth pass: build the grouped structure without cloning the entire HashMap
+        for (pid, (mut proc_info, _parent_pid)) in all_processes {
             if children_pids.contains(&pid) {
-                // This is a child thread, skip for now
+                // This is a child thread, skip
                 continue;
             }
 
-            // Find all children (threads with same name)
-            let mut children: Vec<ProcessInfo> = Vec::new();
-            for (child_pid, (child_info, child_parent)) in &all_processes {
-                if children_pids.contains(child_pid) {
-                    if let Some(parent) = child_parent {
-                        if *parent == pid {
-                            children.push(child_info.clone());
-                        }
-                    }
-                }
-            }
-
-            if !children.is_empty() {
+            // Get pre-collected children for this process
+            if let Some(children) = parent_to_children.remove(&pid) {
                 proc_info.is_group = true;
                 proc_info.children = children;
             }
@@ -250,12 +252,12 @@ impl SystemMonitor {
         // Update history for tracked processes (use total values for groups)
         let max_samples = self.max_samples;
         for proc in &processes {
-            let history = self.process_history.entry(proc.pid).or_insert_with(ProcessHistory::new);
+            let history = self.process_history.entry(proc.pid).or_default();
             history.add_sample(
                 proc.total_cpu(),
                 proc.total_memory(),
-                proc.disk_read_bytes + proc.children.iter().map(|c| c.disk_read_bytes).sum::<u64>(),
-                proc.disk_write_bytes + proc.children.iter().map(|c| c.disk_write_bytes).sum::<u64>(),
+                proc.total_disk_read(),
+                proc.total_disk_write(),
                 max_samples,
             );
         }
@@ -298,7 +300,7 @@ impl SystemMonitor {
                                 }
                             }
                         }
-                        // Also check graphics processes
+                        // Also check graphics processes - take max of compute and graphics usage
                         if let Ok(processes) = device.running_graphics_processes() {
                             for proc in processes {
                                 if let Ok(mem_info) = device.memory_info() {
@@ -308,7 +310,10 @@ impl SystemMonitor {
                                             UsedGpuMemory::Unavailable => 0,
                                         };
                                         let percent = (mem_used as f32 / mem_info.total as f32) * 100.0;
-                                        usage.entry(proc.pid).or_insert(percent);
+                                        usage
+                                            .entry(proc.pid)
+                                            .and_modify(|existing| *existing = existing.max(percent))
+                                            .or_insert(percent);
                                     }
                                 }
                             }

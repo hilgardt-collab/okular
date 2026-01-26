@@ -243,7 +243,7 @@ impl DetailView {
             let cpu_data: Vec<f64> = history.cpu_history.iter().map(|&v| v as f64).collect();
             let cpu_max = cpu_data.iter().cloned().fold(100.0_f64, f64::max);
             self.cpu_graph.update(&cpu_data, cpu_max);
-            if let Some(&current) = history.cpu_history.last() {
+            if let Some(&current) = history.cpu_history.back() {
                 self.current_value_labels.cpu.set_label(&format!("{:.1}%", current));
             }
 
@@ -251,7 +251,7 @@ impl DetailView {
             let memory_data: Vec<f64> = history.memory_history.iter().map(|&v| v as f64).collect();
             let memory_max = memory_data.iter().cloned().fold(1.0_f64, f64::max);
             self.memory_graph.update(&memory_data, memory_max);
-            if let Some(&current) = history.memory_history.last() {
+            if let Some(&current) = history.memory_history.back() {
                 self.current_value_labels.memory.set_label(&format_bytes(current));
             }
 
@@ -259,7 +259,7 @@ impl DetailView {
             let disk_read_data: Vec<f64> = history.disk_read_history.iter().map(|&v| v as f64).collect();
             let disk_read_max = disk_read_data.iter().cloned().fold(1.0_f64, f64::max);
             self.disk_read_graph.update(&disk_read_data, disk_read_max);
-            if let Some(&current) = history.disk_read_history.last() {
+            if let Some(&current) = history.disk_read_history.back() {
                 self.current_value_labels.disk_read.set_label(&format!("{}/s", format_bytes(current)));
             }
 
@@ -267,7 +267,7 @@ impl DetailView {
             let disk_write_data: Vec<f64> = history.disk_write_history.iter().map(|&v| v as f64).collect();
             let disk_write_max = disk_write_data.iter().cloned().fold(1.0_f64, f64::max);
             self.disk_write_graph.update(&disk_write_data, disk_write_max);
-            if let Some(&current) = history.disk_write_history.last() {
+            if let Some(&current) = history.disk_write_history.back() {
                 self.current_value_labels.disk_write.set_label(&format!("{}/s", format_bytes(current)));
             }
         } else {
