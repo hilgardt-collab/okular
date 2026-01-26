@@ -2,8 +2,8 @@
 
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CheckButton, Label, Orientation,
-    ScrolledWindow, Separator, Window,
+    Box as GtkBox, Button, CheckButton, DropDown, Label, Orientation,
+    ScrolledWindow, Separator, StringList, Window,
 };
 use libadwaita as adw;
 use adw::prelude::*;
@@ -15,8 +15,8 @@ use std::time::Duration;
 use crate::detail_view::{DetailView, ProcessDetails};
 use crate::monitor::SystemMonitor;
 use crate::process_actions::{
-    self, get_cpu_affinity, get_cpu_count, kill_process, set_cpu_affinity,
-    set_priority, Priority,
+    self, get_cpu_affinity, get_cpu_core_info, kill_process, set_cpu_affinity,
+    set_priority, Priority, CoreType,
 };
 
 const UPDATE_INTERVAL_MS: u64 = 2000;
@@ -37,8 +37,23 @@ pub fn open_process_window(
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
-    // Header bar
+    // Header bar with history dropdown
     let header = adw::HeaderBar::new();
+
+    // History duration dropdown (up to 60 min for process window)
+    let history_options = StringList::new(&[
+        "1 min", "2 min", "5 min", "10 min", "15 min",
+        "30 min", "45 min", "60 min",
+    ]);
+    let history_dropdown = DropDown::new(Some(history_options), gtk4::Expression::NONE);
+    history_dropdown.set_selected(2); // Default to 5 minutes
+
+    let history_box = GtkBox::new(Orientation::Horizontal, 8);
+    let history_label = Label::new(Some("History:"));
+    history_box.append(&history_label);
+    history_box.append(&history_dropdown);
+    header.pack_end(&history_box);
+
     main_box.append(&header);
 
     // Action buttons bar
@@ -98,6 +113,25 @@ pub fn open_process_window(
     let window_weak_for_timer = window.downgrade();
     let name_owned = name.to_string();
     let detail_view = Rc::new(detail_view);
+
+    // Connect history duration dropdown
+    let monitor_clone = monitor.clone();
+    history_dropdown.connect_selected_notify(move |dropdown| {
+        let idx = dropdown.selected();
+        // Convert to samples (at 2-second intervals)
+        let max_samples = match idx {
+            0 => 30,    // 1 min
+            1 => 60,    // 2 min
+            2 => 150,   // 5 min
+            3 => 300,   // 10 min
+            4 => 450,   // 15 min
+            5 => 900,   // 30 min
+            6 => 1350,  // 45 min
+            7 => 1800,  // 60 min
+            _ => 150,   // Default to 5 min
+        };
+        monitor_clone.borrow_mut().set_max_samples(max_samples);
+    });
 
     // Set up periodic refresh
     let detail_view_clone = detail_view.clone();
@@ -185,17 +219,18 @@ pub fn open_process_window(
     window.present();
 }
 
-/// Show CPU affinity dialog using adw::Window
+/// Show CPU affinity dialog with core type information
 fn show_affinity_dialog(parent: &impl IsA<Window>, pid: u32) {
-    let cpu_count = get_cpu_count();
-    let current_affinity = get_cpu_affinity(pid).unwrap_or_else(|_| vec![true; cpu_count]);
+    let core_info = get_cpu_core_info();
+    let current_affinity = get_cpu_affinity(pid).unwrap_or_else(|_| vec![true; core_info.len()]);
 
     let dialog = adw::Window::builder()
         .title("Set CPU Affinity")
         .transient_for(parent)
         .modal(true)
-        .default_width(300)
-        .default_height(400)
+        .default_width(350)
+        .default_height(500)
+        .resizable(true)
         .build();
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
@@ -223,7 +258,14 @@ fn show_affinity_dialog(parent: &impl IsA<Window>, pid: u32) {
     label.set_halign(gtk4::Align::Start);
     content.append(&label);
 
-    // Create scrolled window for many CPUs
+    // Check if we have any special core types
+    let has_special_cores = core_info.iter().any(|c| c.core_type != CoreType::Standard);
+    if has_special_cores {
+        let legend = create_core_type_legend(&core_info);
+        content.append(&legend);
+    }
+
+    // Create scrolled window for CPU list
     let scrolled = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
@@ -233,9 +275,23 @@ fn show_affinity_dialog(parent: &impl IsA<Window>, pid: u32) {
     let cpu_box = GtkBox::new(Orientation::Vertical, 4);
     let checkboxes: Rc<RefCell<Vec<CheckButton>>> = Rc::new(RefCell::new(Vec::new()));
 
-    for i in 0..cpu_count {
-        let checkbox = CheckButton::with_label(&format!("CPU {}", i));
-        checkbox.set_active(current_affinity.get(i).copied().unwrap_or(true));
+    for info in &core_info {
+        let label_text = if info.core_type != CoreType::Standard {
+            format!("CPU {} ({})", info.cpu_id, info.core_type.label())
+        } else if let Some(die) = info.die_id {
+            format!("CPU {} [CCD {}]", info.cpu_id, die)
+        } else {
+            format!("CPU {}", info.cpu_id)
+        };
+
+        let checkbox = CheckButton::with_label(&label_text);
+        checkbox.set_active(current_affinity.get(info.cpu_id).copied().unwrap_or(true));
+
+        // Apply CSS class based on core type
+        if let Some(css_class) = info.core_type.css_class() {
+            checkbox.add_css_class(css_class);
+        }
+
         cpu_box.append(&checkbox);
         checkboxes.borrow_mut().push(checkbox);
     }
@@ -243,9 +299,10 @@ fn show_affinity_dialog(parent: &impl IsA<Window>, pid: u32) {
     scrolled.set_child(Some(&cpu_box));
     content.append(&scrolled);
 
-    // Select All / Deselect All buttons
+    // Select All / Deselect All / Select by type buttons
     let btn_box = GtkBox::new(Orientation::Horizontal, 8);
     btn_box.set_halign(gtk4::Align::Center);
+    btn_box.set_margin_top(8);
 
     let select_all = Button::with_label("Select All");
     let checkboxes_clone = checkboxes.clone();
@@ -266,8 +323,68 @@ fn show_affinity_dialog(parent: &impl IsA<Window>, pid: u32) {
     btn_box.append(&deselect_all);
 
     content.append(&btn_box);
-    main_box.append(&content);
 
+    // Add core type selection buttons if we have hybrid/X3D cores
+    if has_special_cores {
+        let type_btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        type_btn_box.set_halign(gtk4::Align::Center);
+        type_btn_box.set_margin_top(4);
+
+        // Check what types we have
+        let has_pcores = core_info.iter().any(|c| c.core_type == CoreType::PCore);
+        let has_ecores = core_info.iter().any(|c| c.core_type == CoreType::ECore);
+        let has_x3d = core_info.iter().any(|c| c.core_type == CoreType::X3D);
+
+        if has_pcores {
+            let core_info_clone = core_info.clone();
+            let checkboxes_clone = checkboxes.clone();
+            let pcore_btn = Button::with_label("P-Cores Only");
+            pcore_btn.connect_clicked(move |_| {
+                for (i, cb) in checkboxes_clone.borrow().iter().enumerate() {
+                    cb.set_active(core_info_clone[i].core_type == CoreType::PCore);
+                }
+            });
+            type_btn_box.append(&pcore_btn);
+        }
+
+        if has_ecores {
+            let core_info_clone = core_info.clone();
+            let checkboxes_clone = checkboxes.clone();
+            let ecore_btn = Button::with_label("E-Cores Only");
+            ecore_btn.connect_clicked(move |_| {
+                for (i, cb) in checkboxes_clone.borrow().iter().enumerate() {
+                    cb.set_active(core_info_clone[i].core_type == CoreType::ECore);
+                }
+            });
+            type_btn_box.append(&ecore_btn);
+        }
+
+        if has_x3d {
+            let core_info_clone = core_info.clone();
+            let checkboxes_clone = checkboxes.clone();
+            let x3d_btn = Button::with_label("X3D Only");
+            x3d_btn.connect_clicked(move |_| {
+                for (i, cb) in checkboxes_clone.borrow().iter().enumerate() {
+                    cb.set_active(core_info_clone[i].core_type == CoreType::X3D);
+                }
+            });
+            type_btn_box.append(&x3d_btn);
+
+            let core_info_clone = core_info.clone();
+            let checkboxes_clone = checkboxes.clone();
+            let non_x3d_btn = Button::with_label("Non-X3D Only");
+            non_x3d_btn.connect_clicked(move |_| {
+                for (i, cb) in checkboxes_clone.borrow().iter().enumerate() {
+                    cb.set_active(core_info_clone[i].core_type != CoreType::X3D);
+                }
+            });
+            type_btn_box.append(&non_x3d_btn);
+        }
+
+        content.append(&type_btn_box);
+    }
+
+    main_box.append(&content);
     dialog.set_content(Some(&main_box));
 
     // Cancel button closes dialog
@@ -307,6 +424,38 @@ fn show_affinity_dialog(parent: &impl IsA<Window>, pid: u32) {
     });
 
     dialog.present();
+}
+
+/// Create a legend showing core type colors
+fn create_core_type_legend(core_info: &[crate::process_actions::CpuCoreInfo]) -> GtkBox {
+    let legend = GtkBox::new(Orientation::Horizontal, 16);
+    legend.set_halign(gtk4::Align::Center);
+    legend.set_margin_top(4);
+    legend.set_margin_bottom(4);
+
+    let has_pcores = core_info.iter().any(|c| c.core_type == CoreType::PCore);
+    let has_ecores = core_info.iter().any(|c| c.core_type == CoreType::ECore);
+    let has_x3d = core_info.iter().any(|c| c.core_type == CoreType::X3D);
+
+    if has_pcores {
+        let label = Label::new(Some("● P-Core"));
+        label.add_css_class("accent");
+        legend.append(&label);
+    }
+
+    if has_ecores {
+        let label = Label::new(Some("● E-Core"));
+        label.add_css_class("dim-label");
+        legend.append(&label);
+    }
+
+    if has_x3d {
+        let label = Label::new(Some("● X3D"));
+        label.add_css_class("success");
+        legend.append(&label);
+    }
+
+    legend
 }
 
 /// Show priority dialog using adw::Window

@@ -94,8 +94,6 @@ impl OcularWindow {
                 0 => 30,   // 1 min
                 1 => 60,   // 2 min
                 2 => 150,  // 5 min
-                3 => 300,  // 10 min
-                4 => 900,  // 30 min
                 _ => {
                     eprintln!("Warning: Unexpected dropdown index {}, defaulting to 2 min", idx);
                     60
@@ -202,13 +200,11 @@ impl OcularWindow {
         search_entry.set_width_chars(30);
         header.pack_start(&search_entry);
 
-        // History duration dropdown
+        // History duration dropdown (limited to 5 min for main window)
         let history_options = StringList::new(&[
             "1 min",
             "2 min",
             "5 min",
-            "10 min",
-            "30 min",
         ]);
         let history_dropdown = DropDown::new(Some(history_options), gtk4::Expression::NONE);
         history_dropdown.set_selected(1); // Default to 2 minutes

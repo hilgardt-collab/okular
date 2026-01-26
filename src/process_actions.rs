@@ -237,3 +237,214 @@ pub fn get_command_line(pid: u32) -> Option<String> {
 pub fn is_process_running(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{}", pid)).exists()
 }
+
+/// CPU core type information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoreType {
+    /// Intel Performance core
+    PCore,
+    /// Intel Efficiency core
+    ECore,
+    /// AMD X3D V-Cache core (large L3)
+    X3D,
+    /// Standard core (no special type detected)
+    Standard,
+}
+
+impl CoreType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            CoreType::PCore => "P-Core",
+            CoreType::ECore => "E-Core",
+            CoreType::X3D => "X3D",
+            CoreType::Standard => "",
+        }
+    }
+
+    pub fn css_class(&self) -> Option<&'static str> {
+        match self {
+            CoreType::PCore => Some("accent"),
+            CoreType::ECore => Some("dim-label"),
+            CoreType::X3D => Some("success"),
+            CoreType::Standard => None,
+        }
+    }
+}
+
+/// Information about a CPU core
+#[derive(Debug, Clone)]
+pub struct CpuCoreInfo {
+    pub cpu_id: usize,
+    pub core_type: CoreType,
+    pub die_id: Option<usize>,
+    #[allow(dead_code)] // Stored for potential future use (tooltips, detailed view)
+    pub l3_cache_kb: Option<usize>,
+}
+
+/// Get detailed information about all CPU cores
+pub fn get_cpu_core_info() -> Vec<CpuCoreInfo> {
+    let cpu_count = get_cpu_count();
+    let mut cores = Vec::with_capacity(cpu_count);
+
+    // Try to detect Intel hybrid (P-core/E-core)
+    let intel_core_types = detect_intel_hybrid_cores();
+
+    // Try to detect AMD X3D cores
+    let amd_x3d_cores = detect_amd_x3d_cores(cpu_count);
+
+    for i in 0..cpu_count {
+        let core_type = if let Some(ref types) = intel_core_types {
+            types.get(i).cloned().unwrap_or(CoreType::Standard)
+        } else if let Some(ref x3d) = amd_x3d_cores {
+            if x3d.contains(&i) {
+                CoreType::X3D
+            } else {
+                CoreType::Standard
+            }
+        } else {
+            CoreType::Standard
+        };
+
+        let die_id = fs::read_to_string(format!("/sys/devices/system/cpu/cpu{}/topology/die_id", i))
+            .ok()
+            .and_then(|s| s.trim().parse().ok());
+
+        let l3_cache_kb = fs::read_to_string(format!("/sys/devices/system/cpu/cpu{}/cache/index3/size", i))
+            .ok()
+            .and_then(|s| {
+                let s = s.trim();
+                if s.ends_with('K') {
+                    s[..s.len()-1].parse().ok()
+                } else if s.ends_with('M') {
+                    s[..s.len()-1].parse::<usize>().ok().map(|m| m * 1024)
+                } else {
+                    s.parse().ok()
+                }
+            });
+
+        cores.push(CpuCoreInfo {
+            cpu_id: i,
+            core_type,
+            die_id,
+            l3_cache_kb,
+        });
+    }
+
+    cores
+}
+
+/// Detect Intel hybrid cores (P-core vs E-core)
+/// Returns None if not an Intel hybrid CPU
+fn detect_intel_hybrid_cores() -> Option<Vec<CoreType>> {
+    let types_dir = std::path::Path::new("/sys/devices/system/cpu/types");
+    if !types_dir.exists() {
+        return None;
+    }
+
+    let cpu_count = get_cpu_count();
+    let mut core_types = vec![CoreType::Standard; cpu_count];
+
+    // Look for intel_pcore and intel_ecore directories
+    if let Ok(entries) = fs::read_dir(types_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+
+            let core_type = if name_str.contains("pcore") || name_str.contains("atom") == false && name_str.contains("intel") {
+                // Check if it's specifically a performance core
+                if name_str.to_lowercase().contains("pcore") || name_str.to_lowercase().contains("core") && !name_str.to_lowercase().contains("ecore") {
+                    Some(CoreType::PCore)
+                } else {
+                    None
+                }
+            } else if name_str.to_lowercase().contains("ecore") || name_str.to_lowercase().contains("atom") {
+                Some(CoreType::ECore)
+            } else {
+                None
+            };
+
+            if let Some(ct) = core_type {
+                // Read the cpulist file
+                let cpulist_path = entry.path().join("cpulist");
+                if let Ok(cpulist) = fs::read_to_string(&cpulist_path) {
+                    for cpu in parse_cpu_list(&cpulist) {
+                        if cpu < cpu_count {
+                            core_types[cpu] = ct.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if we found any hybrid cores
+    if core_types.iter().any(|t| *t != CoreType::Standard) {
+        Some(core_types)
+    } else {
+        None
+    }
+}
+
+/// Detect AMD X3D cores based on L3 cache size
+/// X3D CCDs have significantly larger L3 cache (96MB vs 32MB per CCD)
+fn detect_amd_x3d_cores(cpu_count: usize) -> Option<Vec<usize>> {
+    // Check if this is an AMD CPU
+    let cpuinfo = fs::read_to_string("/proc/cpuinfo").ok()?;
+    if !cpuinfo.contains("AMD") {
+        return None;
+    }
+
+    // Group cores by their L3 cache size
+    let mut cache_sizes: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+
+    for i in 0..cpu_count {
+        let cache_path = format!("/sys/devices/system/cpu/cpu{}/cache/index3/size", i);
+        if let Ok(size_str) = fs::read_to_string(&cache_path) {
+            let size_str = size_str.trim();
+            let size_kb = if size_str.ends_with('K') {
+                size_str[..size_str.len()-1].parse::<usize>().unwrap_or(0)
+            } else if size_str.ends_with('M') {
+                size_str[..size_str.len()-1].parse::<usize>().unwrap_or(0) * 1024
+            } else {
+                size_str.parse::<usize>().unwrap_or(0)
+            };
+
+            cache_sizes.entry(size_kb).or_default().push(i);
+        }
+    }
+
+    // If there are different L3 cache sizes, the larger ones are likely X3D
+    if cache_sizes.len() > 1 {
+        let max_size = *cache_sizes.keys().max()?;
+        // X3D cores typically have 96MB L3 cache per CCD (98304 KB)
+        // Regular CCDs have ~32MB (32768 KB)
+        // Consider cores with largest cache as X3D if it's significantly larger
+        let min_size = *cache_sizes.keys().min()?;
+        if max_size > min_size * 2 {
+            return Some(cache_sizes.get(&max_size)?.clone());
+        }
+    }
+
+    None
+}
+
+/// Parse a CPU list string like "0-3,8-11" into individual CPU numbers
+fn parse_cpu_list(list: &str) -> Vec<usize> {
+    let mut cpus = Vec::new();
+    for part in list.trim().split(',') {
+        let part = part.trim();
+        if part.contains('-') {
+            let mut range = part.split('-');
+            if let (Some(start), Some(end)) = (range.next(), range.next()) {
+                if let (Ok(start), Ok(end)) = (start.parse::<usize>(), end.parse::<usize>()) {
+                    for i in start..=end {
+                        cpus.push(i);
+                    }
+                }
+            }
+        } else if let Ok(cpu) = part.parse::<usize>() {
+            cpus.push(cpu);
+        }
+    }
+    cpus
+}
