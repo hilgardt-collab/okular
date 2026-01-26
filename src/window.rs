@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::monitor::SystemMonitor;
 use crate::process_list::ProcessListView;
-use crate::detail_view::DetailView;
+use crate::detail_view::{DetailView, ProcessDetails};
 
 const UPDATE_INTERVAL_MS: u64 = 2000; // 2 seconds
 
@@ -112,7 +112,8 @@ impl OcularWindow {
                         *selected_pid_clone.borrow_mut() = Some(pid);
                         let monitor = monitor_clone.borrow();
                         let history = monitor.get_history(pid);
-                        detail_view_clone.update(&name, pid, history);
+                        let process_details = ProcessDetails::from_pid(pid);
+                        detail_view_clone.update(&name, pid, history, process_details.as_ref());
                     }
                 }
             } else {
@@ -151,7 +152,8 @@ impl OcularWindow {
             if let Some(pid) = current_pid {
                 if let Some(proc) = processes.iter().find(|p| p.pid == pid) {
                     let history = mon.get_history(pid);
-                    detail_view_clone.update(&proc.name, pid, history);
+                    let process_details = ProcessDetails::from_pid(pid);
+                    detail_view_clone.update(&proc.name, pid, history, process_details.as_ref());
                 } else {
                     // Process no longer exists - clear selection
                     #[cfg(debug_assertions)]
