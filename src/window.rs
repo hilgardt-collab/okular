@@ -14,9 +14,9 @@ use crate::process_window;
 
 const UPDATE_INTERVAL_MS: u64 = 2000; // 2 seconds
 
-pub struct OcularWindow;
+pub struct OkularWindow;
 
-impl OcularWindow {
+impl OkularWindow {
     /// Build and return the main application window
     pub fn build(app: &adw::Application) -> adw::ApplicationWindow {
         // Create window

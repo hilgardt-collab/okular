@@ -452,13 +452,6 @@ impl CpuCoreDisplay {
             }
         }
     }
-
-    fn clear(&self) {
-        for (_, count_label) in &self.core_labels {
-            count_label.set_label("-");
-            count_label.add_css_class("dim-label");
-        }
-    }
 }
 
 struct StatsLabels {
@@ -840,38 +833,6 @@ impl DetailView {
             self.net_rx_stats.update(None, false, true);
             self.net_tx_stats.update(None, false, true);
         }
-    }
-
-    /// Clear the detail view
-    pub fn clear(&self) {
-        self.title_label.set_label("Select a process");
-        *self.current_pid.borrow_mut() = None;
-
-        self.info_labels.command.set_label("-");
-        self.info_labels.command.set_tooltip_text(None);
-        self.info_labels.threads.set_label("-");
-        self.info_labels.state.set_label("-");
-        self.info_labels.user.set_label("-");
-
-        self.cpu_core_display.clear();
-
-        self.cpu_graph.update(&[], 60, 2);
-        self.memory_graph.update(&[], 60, 2);
-        self.gpu_mem_graph.update(&[], 60, 2);
-        self.gpu_util_graph.update(&[], 60, 2);
-        self.disk_read_graph.update(&[], 60, 2);
-        self.disk_write_graph.update(&[], 60, 2);
-        self.net_rx_graph.update(&[], 60, 2);
-        self.net_tx_graph.update(&[], 60, 2);
-
-        self.cpu_stats.update(None, true, false);
-        self.memory_stats.update(None, false, true);
-        self.gpu_mem_stats.update(None, true, false);
-        self.gpu_util_stats.update(None, true, false);
-        self.disk_read_stats.update(None, false, true);
-        self.disk_write_stats.update(None, false, true);
-        self.net_rx_stats.update(None, false, true);
-        self.net_tx_stats.update(None, false, true);
     }
 }
 

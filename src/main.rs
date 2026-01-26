@@ -30,7 +30,7 @@ fn main() -> glib::ExitCode {
         .build();
 
     app.connect_activate(|app| {
-        let window = window::OcularWindow::build(app);
+        let window = window::OkularWindow::build(app);
         window.present();
     });
 

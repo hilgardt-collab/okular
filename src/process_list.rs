@@ -34,7 +34,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for ProcessObject {
-        const NAME: &'static str = "OcularProcessObject";
+        const NAME: &'static str = "OkularProcessObject";
         type Type = super::ProcessObject;
     }
 
