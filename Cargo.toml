@@ -1,6 +1,6 @@
 [package]
 name = "ocular"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A Linux process monitor similar to GNOME System Monitor"
 authors = ["hilgardt-collab"]
