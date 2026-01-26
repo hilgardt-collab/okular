@@ -16,6 +16,50 @@ fn read_tgid(pid: u32) -> Option<u32> {
     None
 }
 
+/// Read total network bytes (rx, tx) from /proc/net/dev
+/// Sums all non-loopback interfaces
+fn read_network_totals() -> (u64, u64) {
+    let mut rx_total = 0u64;
+    let mut tx_total = 0u64;
+
+    if let Ok(content) = fs::read_to_string("/proc/net/dev") {
+        for line in content.lines().skip(2) {
+            // Format: "iface: rx_bytes rx_packets ... tx_bytes tx_packets ..."
+            let line = line.trim();
+            if line.starts_with("lo:") {
+                continue; // Skip loopback
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 10 {
+                // First field is "iface:" or "iface" depending on spacing
+                // rx_bytes is at index 1, tx_bytes is at index 9
+                let iface_and_rx: Vec<&str> = parts[0].split(':').collect();
+                let rx_idx = if iface_and_rx.len() > 1 && !iface_and_rx[1].is_empty() {
+                    // "iface:12345" format - rx is part of first field
+                    if let Ok(rx) = iface_and_rx[1].parse::<u64>() {
+                        rx_total += rx;
+                    }
+                    0 // tx_bytes is at parts[8]
+                } else {
+                    // "iface: 12345" format - rx is at parts[1]
+                    if let Ok(rx) = parts[1].parse::<u64>() {
+                        rx_total += rx;
+                    }
+                    1 // tx_bytes is at parts[9]
+                };
+                let tx_idx = rx_idx + 8;
+                if let Some(tx_str) = parts.get(tx_idx) {
+                    if let Ok(tx) = tx_str.parse::<u64>() {
+                        tx_total += tx;
+                    }
+                }
+            }
+        }
+    }
+
+    (rx_total, tx_total)
+}
+
 /// Represents a single process with its resource usage
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
@@ -26,6 +70,8 @@ pub struct ProcessInfo {
     pub disk_read_bytes: u64,
     pub disk_write_bytes: u64,
     pub gpu_percent: Option<f32>,
+    pub net_rx_bytes: u64,
+    pub net_tx_bytes: u64,
     /// Child processes/threads
     pub children: Vec<ProcessInfo>,
     /// Whether this is a group (has children aggregated)
@@ -59,6 +105,25 @@ impl ProcessInfo {
         self.total_disk_read() + self.total_disk_write()
     }
 
+    /// Get total GPU percent (max of self and children)
+    pub fn total_gpu(&self) -> f32 {
+        let self_gpu = self.gpu_percent.unwrap_or(0.0);
+        let children_max = self.children.iter()
+            .filter_map(|c| c.gpu_percent)
+            .fold(0.0_f32, f32::max);
+        self_gpu.max(children_max)
+    }
+
+    /// Get total network RX including children
+    pub fn total_net_rx(&self) -> u64 {
+        self.net_rx_bytes + self.children.iter().map(|c| c.net_rx_bytes).sum::<u64>()
+    }
+
+    /// Get total network TX including children
+    pub fn total_net_tx(&self) -> u64 {
+        self.net_tx_bytes + self.children.iter().map(|c| c.net_tx_bytes).sum::<u64>()
+    }
+
     /// Get child count
     pub fn child_count(&self) -> usize {
         self.children.len()
@@ -72,14 +137,30 @@ pub struct ProcessHistory {
     pub memory_history: VecDeque<u64>,
     pub disk_read_history: VecDeque<u64>,
     pub disk_write_history: VecDeque<u64>,
+    pub gpu_history: VecDeque<f32>,
+    pub net_rx_history: VecDeque<u64>,
+    pub net_tx_history: VecDeque<u64>,
 }
 
 impl ProcessHistory {
-    pub fn add_sample(&mut self, cpu: f32, memory: u64, disk_read: u64, disk_write: u64, max_samples: usize) {
+    pub fn add_sample(
+        &mut self,
+        cpu: f32,
+        memory: u64,
+        disk_read: u64,
+        disk_write: u64,
+        gpu: f32,
+        net_rx: u64,
+        net_tx: u64,
+        max_samples: usize,
+    ) {
         self.cpu_history.push_back(cpu);
         self.memory_history.push_back(memory);
         self.disk_read_history.push_back(disk_read);
         self.disk_write_history.push_back(disk_write);
+        self.gpu_history.push_back(gpu);
+        self.net_rx_history.push_back(net_rx);
+        self.net_tx_history.push_back(net_tx);
 
         // Keep only the last max_samples - O(1) pop_front instead of O(n) remove(0)
         while self.cpu_history.len() > max_samples {
@@ -93,6 +174,15 @@ impl ProcessHistory {
         }
         while self.disk_write_history.len() > max_samples {
             self.disk_write_history.pop_front();
+        }
+        while self.gpu_history.len() > max_samples {
+            self.gpu_history.pop_front();
+        }
+        while self.net_rx_history.len() > max_samples {
+            self.net_rx_history.pop_front();
+        }
+        while self.net_tx_history.len() > max_samples {
+            self.net_tx_history.pop_front();
         }
     }
 
@@ -110,6 +200,15 @@ impl ProcessHistory {
         while self.disk_write_history.len() > max_samples {
             self.disk_write_history.pop_front();
         }
+        while self.gpu_history.len() > max_samples {
+            self.gpu_history.pop_front();
+        }
+        while self.net_rx_history.len() > max_samples {
+            self.net_rx_history.pop_front();
+        }
+        while self.net_tx_history.len() > max_samples {
+            self.net_tx_history.pop_front();
+        }
     }
 }
 
@@ -120,6 +219,11 @@ pub struct SystemMonitor {
     nvml: Option<nvml_wrapper::Nvml>,
     cpu_count: usize,
     max_samples: usize,
+    // Network tracking (system-wide rates)
+    last_net_rx: u64,
+    last_net_tx: u64,
+    net_rx_rate: u64,
+    net_tx_rate: u64,
 }
 
 impl SystemMonitor {
@@ -143,12 +247,19 @@ impl SystemMonitor {
             .with_disk_usage();
         system.refresh_processes_specifics(ProcessesToUpdate::All, refresh_kind);
 
+        // Initialize network tracking
+        let (net_rx, net_tx) = read_network_totals();
+
         Self {
             system,
             process_history: HashMap::new(),
             nvml,
             cpu_count,
             max_samples: 60, // Default: 2 minutes at 2-second intervals
+            last_net_rx: net_rx,
+            last_net_tx: net_tx,
+            net_rx_rate: 0,
+            net_tx_rate: 0,
         }
     }
 
@@ -173,6 +284,18 @@ impl SystemMonitor {
         self.cpu_count
     }
 
+    /// Get current network RX rate (bytes per refresh interval)
+    #[allow(dead_code)]
+    pub fn net_rx_rate(&self) -> u64 {
+        self.net_rx_rate
+    }
+
+    /// Get current network TX rate (bytes per refresh interval)
+    #[allow(dead_code)]
+    pub fn net_tx_rate(&self) -> u64 {
+        self.net_tx_rate
+    }
+
     /// Refresh process data and return top 150 processes by CPU usage, grouped by TGID
     pub fn refresh(&mut self) -> Vec<ProcessInfo> {
         let refresh_kind = ProcessRefreshKind::new()
@@ -180,6 +303,13 @@ impl SystemMonitor {
             .with_memory()
             .with_disk_usage();
         self.system.refresh_processes_specifics(ProcessesToUpdate::All, refresh_kind);
+
+        // Update network rates (system-wide)
+        let (net_rx, net_tx) = read_network_totals();
+        self.net_rx_rate = net_rx.saturating_sub(self.last_net_rx);
+        self.net_tx_rate = net_tx.saturating_sub(self.last_net_tx);
+        self.last_net_rx = net_rx;
+        self.last_net_tx = net_tx;
 
         // Get GPU utilization per process if available
         let gpu_usage = self.get_gpu_process_usage();
@@ -206,6 +336,10 @@ impl SystemMonitor {
                 disk_read_bytes: proc.disk_usage().read_bytes,
                 disk_write_bytes: proc.disk_usage().written_bytes,
                 gpu_percent: gpu_usage.get(&pid_u32).copied(),
+                // Per-process network stats require eBPF or netfilter accounting
+                // For now, we track system-wide rates in the monitor
+                net_rx_bytes: 0,
+                net_tx_bytes: 0,
                 children: Vec::new(),
                 is_group: false,
             };
@@ -253,6 +387,8 @@ impl SystemMonitor {
 
         // Update history for tracked processes (use total values for groups)
         let max_samples = self.max_samples;
+        let net_rx = self.net_rx_rate;
+        let net_tx = self.net_tx_rate;
         for proc in &processes {
             let history = self.process_history.entry(proc.pid).or_default();
             history.add_sample(
@@ -260,6 +396,9 @@ impl SystemMonitor {
                 proc.total_memory(),
                 proc.total_disk_read(),
                 proc.total_disk_write(),
+                proc.total_gpu(),
+                net_rx, // System-wide network for now
+                net_tx,
                 max_samples,
             );
         }

@@ -11,6 +11,9 @@ const CPU_COLOR: (f64, f64, f64) = (0.204, 0.396, 0.643); // Blue
 const MEMORY_COLOR: (f64, f64, f64) = (0.584, 0.345, 0.698); // Purple
 const DISK_READ_COLOR: (f64, f64, f64) = (0.180, 0.545, 0.341); // Green
 const DISK_WRITE_COLOR: (f64, f64, f64) = (0.902, 0.494, 0.133); // Orange
+const GPU_COLOR: (f64, f64, f64) = (0.118, 0.565, 0.659); // Teal
+const NET_RX_COLOR: (f64, f64, f64) = (0.608, 0.349, 0.714); // Light purple
+const NET_TX_COLOR: (f64, f64, f64) = (0.839, 0.153, 0.157); // Red
 
 /// Graph configuration
 const GRAPH_LEFT_MARGIN: f64 = 55.0;  // Space for Y-axis labels
@@ -304,13 +307,19 @@ pub struct DetailView {
     // Graphs
     cpu_graph: GraphWidget,
     memory_graph: GraphWidget,
+    gpu_graph: GraphWidget,
     disk_read_graph: GraphWidget,
     disk_write_graph: GraphWidget,
+    net_rx_graph: GraphWidget,
+    net_tx_graph: GraphWidget,
     // Stats labels
     cpu_stats: StatsLabels,
     memory_stats: StatsLabels,
+    gpu_stats: StatsLabels,
     disk_read_stats: StatsLabels,
     disk_write_stats: StatsLabels,
+    net_rx_stats: StatsLabels,
+    net_tx_stats: StatsLabels,
 }
 
 struct ProcessInfoLabels {
@@ -513,14 +522,20 @@ impl DetailView {
         // Create graphs
         let cpu_graph = GraphWidget::new(CPU_COLOR, true, false);
         let memory_graph = GraphWidget::new(MEMORY_COLOR, false, true);
+        let gpu_graph = GraphWidget::new(GPU_COLOR, true, false);
         let disk_read_graph = GraphWidget::new(DISK_READ_COLOR, false, true);
         let disk_write_graph = GraphWidget::new(DISK_WRITE_COLOR, false, true);
+        let net_rx_graph = GraphWidget::new(NET_RX_COLOR, false, true);
+        let net_tx_graph = GraphWidget::new(NET_TX_COLOR, false, true);
 
         // Create stats labels
         let cpu_stats = StatsLabels::new();
         let memory_stats = StatsLabels::new();
+        let gpu_stats = StatsLabels::new();
         let disk_read_stats = StatsLabels::new();
         let disk_write_stats = StatsLabels::new();
+        let net_rx_stats = StatsLabels::new();
+        let net_tx_stats = StatsLabels::new();
 
         // CPU section
         let cpu_section = Self::create_graph_section("CPU Usage", &cpu_graph, &cpu_stats);
@@ -530,6 +545,10 @@ impl DetailView {
         let memory_section = Self::create_graph_section("Memory", &memory_graph, &memory_stats);
         container.append(&memory_section);
 
+        // GPU section
+        let gpu_section = Self::create_graph_section("GPU Memory", &gpu_graph, &gpu_stats);
+        container.append(&gpu_section);
+
         // Disk Read section
         let disk_read_section = Self::create_graph_section("Disk Read", &disk_read_graph, &disk_read_stats);
         container.append(&disk_read_section);
@@ -537,6 +556,14 @@ impl DetailView {
         // Disk Write section
         let disk_write_section = Self::create_graph_section("Disk Write", &disk_write_graph, &disk_write_stats);
         container.append(&disk_write_section);
+
+        // Network RX section (system-wide)
+        let net_rx_section = Self::create_graph_section("Network RX (System)", &net_rx_graph, &net_rx_stats);
+        container.append(&net_rx_section);
+
+        // Network TX section (system-wide)
+        let net_tx_section = Self::create_graph_section("Network TX (System)", &net_tx_graph, &net_tx_stats);
+        container.append(&net_tx_section);
 
         // Wrap in scrolled window
         let scrolled = ScrolledWindow::builder()
@@ -556,12 +583,18 @@ impl DetailView {
             current_pid: RefCell::new(None),
             cpu_graph,
             memory_graph,
+            gpu_graph,
             disk_read_graph,
             disk_write_graph,
+            net_rx_graph,
+            net_tx_graph,
             cpu_stats,
             memory_stats,
+            gpu_stats,
             disk_read_stats,
             disk_write_stats,
+            net_rx_stats,
+            net_tx_stats,
         }
     }
 
@@ -673,6 +706,11 @@ impl DetailView {
             self.memory_graph.update(&memory_data, num_samples, sample_interval);
             self.memory_stats.update(MetricStats::from_data(&memory_data), false, true);
 
+            // GPU
+            let gpu_data: Vec<f64> = history.gpu_history.iter().map(|&v| v as f64).collect();
+            self.gpu_graph.update(&gpu_data, num_samples, sample_interval);
+            self.gpu_stats.update(MetricStats::from_data(&gpu_data), true, false);
+
             // Disk read
             let disk_read_data: Vec<f64> = history.disk_read_history.iter().map(|&v| v as f64).collect();
             self.disk_read_graph.update(&disk_read_data, num_samples, sample_interval);
@@ -682,16 +720,32 @@ impl DetailView {
             let disk_write_data: Vec<f64> = history.disk_write_history.iter().map(|&v| v as f64).collect();
             self.disk_write_graph.update(&disk_write_data, num_samples, sample_interval);
             self.disk_write_stats.update(MetricStats::from_data(&disk_write_data), false, true);
+
+            // Network RX (system-wide)
+            let net_rx_data: Vec<f64> = history.net_rx_history.iter().map(|&v| v as f64).collect();
+            self.net_rx_graph.update(&net_rx_data, num_samples, sample_interval);
+            self.net_rx_stats.update(MetricStats::from_data(&net_rx_data), false, true);
+
+            // Network TX (system-wide)
+            let net_tx_data: Vec<f64> = history.net_tx_history.iter().map(|&v| v as f64).collect();
+            self.net_tx_graph.update(&net_tx_data, num_samples, sample_interval);
+            self.net_tx_stats.update(MetricStats::from_data(&net_tx_data), false, true);
         } else {
             // No history yet - show empty graphs
             self.cpu_graph.update(&[], 60, 2);
             self.memory_graph.update(&[], 60, 2);
+            self.gpu_graph.update(&[], 60, 2);
             self.disk_read_graph.update(&[], 60, 2);
             self.disk_write_graph.update(&[], 60, 2);
+            self.net_rx_graph.update(&[], 60, 2);
+            self.net_tx_graph.update(&[], 60, 2);
             self.cpu_stats.update(None, true, false);
             self.memory_stats.update(None, false, true);
+            self.gpu_stats.update(None, true, false);
             self.disk_read_stats.update(None, false, true);
             self.disk_write_stats.update(None, false, true);
+            self.net_rx_stats.update(None, false, true);
+            self.net_tx_stats.update(None, false, true);
         }
     }
 
@@ -710,13 +764,19 @@ impl DetailView {
 
         self.cpu_graph.update(&[], 60, 2);
         self.memory_graph.update(&[], 60, 2);
+        self.gpu_graph.update(&[], 60, 2);
         self.disk_read_graph.update(&[], 60, 2);
         self.disk_write_graph.update(&[], 60, 2);
+        self.net_rx_graph.update(&[], 60, 2);
+        self.net_tx_graph.update(&[], 60, 2);
 
         self.cpu_stats.update(None, true, false);
         self.memory_stats.update(None, false, true);
+        self.gpu_stats.update(None, true, false);
         self.disk_read_stats.update(None, false, true);
         self.disk_write_stats.update(None, false, true);
+        self.net_rx_stats.update(None, false, true);
+        self.net_tx_stats.update(None, false, true);
     }
 }
 
