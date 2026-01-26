@@ -1,5 +1,20 @@
 use sysinfo::{System, ProcessesToUpdate, ProcessRefreshKind};
 use std::collections::{HashMap, VecDeque};
+use std::fs;
+
+/// Read the Thread Group ID (TGID) from /proc/<pid>/status
+/// Returns None if the file cannot be read or parsed
+fn read_tgid(pid: u32) -> Option<u32> {
+    let status_path = format!("/proc/{}/status", pid);
+    let content = fs::read_to_string(status_path).ok()?;
+
+    for line in content.lines() {
+        if let Some(tgid_str) = line.strip_prefix("Tgid:") {
+            return tgid_str.trim().parse().ok();
+        }
+    }
+    None
+}
 
 /// Represents a single process with its resource usage
 #[derive(Debug, Clone)]
@@ -158,7 +173,7 @@ impl SystemMonitor {
         self.cpu_count
     }
 
-    /// Refresh process data and return top 150 processes by CPU usage, grouped by parent
+    /// Refresh process data and return top 150 processes by CPU usage, grouped by TGID
     pub fn refresh(&mut self) -> Vec<ProcessInfo> {
         let refresh_kind = ProcessRefreshKind::new()
             .with_cpu()
@@ -172,12 +187,15 @@ impl SystemMonitor {
         // Normalize CPU by dividing by CPU count
         let cpu_divisor = self.cpu_count as f32;
 
-        // First pass: collect all processes with their parent info
+        // First pass: collect all processes with their TGID
+        // TGID (Thread Group ID) identifies which thread group a process belongs to
+        // - If PID == TGID: this is the thread group leader (main process)
+        // - If PID != TGID: this is a thread belonging to the group with that TGID
         let mut all_processes: HashMap<u32, (ProcessInfo, Option<u32>)> = HashMap::new();
 
         for (pid, proc) in self.system.processes() {
             let pid_u32 = pid.as_u32();
-            let parent_pid = proc.parent().map(|p| p.as_u32());
+            let tgid = read_tgid(pid_u32);
             let normalized_cpu = proc.cpu_usage() / cpu_divisor;
 
             let info = ProcessInfo {
@@ -192,56 +210,40 @@ impl SystemMonitor {
                 is_group: false,
             };
 
-            all_processes.insert(pid_u32, (info, parent_pid));
+            all_processes.insert(pid_u32, (info, tgid));
         }
 
-        // Second pass: group children under parents with the same name
-        // A process is considered a "thread" if its parent has the same name
-        let mut grouped: HashMap<u32, ProcessInfo> = HashMap::new();
-        let mut children_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        // Second pass: identify threads (PID != TGID) and group leaders (PID == TGID)
+        let mut thread_group_leaders: HashMap<u32, ProcessInfo> = HashMap::new();
+        let mut threads_by_tgid: HashMap<u32, Vec<ProcessInfo>> = HashMap::new();
 
-        for (pid, (proc_info, parent_pid)) in &all_processes {
-            if let Some(parent) = parent_pid {
-                // Check if parent exists and has the same name (likely a thread)
-                if let Some((parent_info, _)) = all_processes.get(parent) {
-                    if parent_info.name == proc_info.name {
-                        // This is a thread - will be added as child of parent
-                        children_pids.insert(*pid);
-                        continue;
-                    }
+        for (pid, (proc_info, tgid)) in all_processes {
+            match tgid {
+                Some(tgid) if tgid != pid => {
+                    // This is a thread (PID != TGID), group it under its TGID
+                    threads_by_tgid
+                        .entry(tgid)
+                        .or_default()
+                        .push(proc_info);
+                }
+                _ => {
+                    // This is a thread group leader (PID == TGID) or TGID unknown
+                    thread_group_leaders.insert(pid, proc_info);
                 }
             }
         }
 
-        // Third pass: collect children for each parent
-        let mut parent_to_children: HashMap<u32, Vec<ProcessInfo>> = HashMap::new();
-        for child_pid in &children_pids {
-            if let Some((child_info, Some(parent))) = all_processes.get(child_pid) {
-                parent_to_children
-                    .entry(*parent)
-                    .or_default()
-                    .push(child_info.clone());
+        // Third pass: attach threads to their group leaders
+        for (tgid, threads) in threads_by_tgid {
+            if let Some(leader) = thread_group_leaders.get_mut(&tgid) {
+                leader.is_group = true;
+                leader.children = threads;
             }
-        }
-
-        // Fourth pass: build the grouped structure without cloning the entire HashMap
-        for (pid, (mut proc_info, _parent_pid)) in all_processes {
-            if children_pids.contains(&pid) {
-                // This is a child thread, skip
-                continue;
-            }
-
-            // Get pre-collected children for this process
-            if let Some(children) = parent_to_children.remove(&pid) {
-                proc_info.is_group = true;
-                proc_info.children = children;
-            }
-
-            grouped.insert(pid, proc_info);
+            // If the leader doesn't exist (rare race condition), threads are dropped
         }
 
         // Convert to vec and sort by total CPU usage
-        let mut processes: Vec<ProcessInfo> = grouped.into_values().collect();
+        let mut processes: Vec<ProcessInfo> = thread_group_leaders.into_values().collect();
         processes.sort_by(|a, b| {
             b.total_cpu().partial_cmp(&a.total_cpu()).unwrap_or(std::cmp::Ordering::Equal)
         });
