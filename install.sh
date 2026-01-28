@@ -5,6 +5,7 @@ PREFIX="${PREFIX:-/usr/local}"
 BINDIR="${PREFIX}/bin"
 ICONDIR="${PREFIX}/share/icons/hicolor/256x256/apps"
 DESKTOPDIR="${PREFIX}/share/applications"
+PIXMAPDIR="${PREFIX}/share/pixmaps"
 
 # Find the script's directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,14 +48,19 @@ fi
 mkdir -p "$BINDIR"
 mkdir -p "$ICONDIR"
 mkdir -p "$DESKTOPDIR"
+mkdir -p "$PIXMAPDIR"
 
 # Install binary
 install -m 755 "$BINARY" "$BINDIR/procular"
 echo "Installed binary to $BINDIR/procular"
 
-# Install icon
+# Install icon to multiple locations for compatibility
 install -m 644 "$ICON" "$ICONDIR/procular.png"
 echo "Installed icon to $ICONDIR/procular.png"
+install -m 644 "$ICON" "$PIXMAPDIR/procular.png"
+echo "Installed icon to $PIXMAPDIR/procular.png"
+install -m 644 "$ICON" "$BINDIR/procular.png"
+echo "Installed icon to $BINDIR/procular.png"
 
 # Create desktop entry
 cat > "$DESKTOPDIR/procular.desktop" << 'DESKTOP'

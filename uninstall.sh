@@ -5,6 +5,7 @@ PREFIX="${PREFIX:-/usr/local}"
 BINDIR="${PREFIX}/bin"
 ICONDIR="${PREFIX}/share/icons/hicolor/256x256/apps"
 DESKTOPDIR="${PREFIX}/share/applications"
+PIXMAPDIR="${PREFIX}/share/pixmaps"
 
 echo "Uninstalling Procular..."
 
@@ -24,6 +25,16 @@ fi
 if [ -f "$ICONDIR/procular.png" ]; then
     rm -f "$ICONDIR/procular.png"
     echo "Removed $ICONDIR/procular.png"
+fi
+
+if [ -f "$PIXMAPDIR/procular.png" ]; then
+    rm -f "$PIXMAPDIR/procular.png"
+    echo "Removed $PIXMAPDIR/procular.png"
+fi
+
+if [ -f "$BINDIR/procular.png" ]; then
+    rm -f "$BINDIR/procular.png"
+    echo "Removed $BINDIR/procular.png"
 fi
 
 if [ -f "$DESKTOPDIR/procular.desktop" ]; then
