@@ -14,16 +14,16 @@ use crate::process_window;
 
 const UPDATE_INTERVAL_MS: u64 = 2000; // 2 seconds
 
-pub struct OkularWindow;
+pub struct ProcularWindow;
 
-impl OkularWindow {
+impl ProcularWindow {
     /// Build and return the main application window
     pub fn build(app: &adw::Application) -> adw::ApplicationWindow {
         // Create window
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("okular")
-            .icon_name("okular")
+            .title("Procular")
+            .icon_name("procular")
             .default_width(1200)
             .default_height(700)
             .build();

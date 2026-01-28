@@ -9,7 +9,7 @@ mod window;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
-const APP_ID: &str = "org.okular.ProcessMonitor";
+const APP_ID: &str = "org.procular.ProcessMonitor";
 
 fn main() -> glib::ExitCode {
     // Initialize GTK
@@ -30,7 +30,7 @@ fn main() -> glib::ExitCode {
         .build();
 
     app.connect_activate(|app| {
-        let window = window::OkularWindow::build(app);
+        let window = window::ProcularWindow::build(app);
         window.present();
     });
 

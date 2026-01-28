@@ -1,5 +1,5 @@
 [package]
-name = "okular"
+name = "procular"
 version = "0.2.0"
 edition = "2021"
 description = "A Linux process monitor similar to GNOME System Monitor"

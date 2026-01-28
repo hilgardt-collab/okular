@@ -581,18 +581,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "okular"
-version = "0.2.0"
-dependencies = [
- "cairo-rs",
- "glib",
- "gtk4",
- "libadwaita",
- "nvml-wrapper",
- "sysinfo",
-]
-
-[[package]]
 name = "pango"
 version = "0.20.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -650,6 +638,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "procular"
+version = "0.2.0"
+dependencies = [
+ "cairo-rs",
+ "glib",
+ "gtk4",
+ "libadwaita",
+ "nvml-wrapper",
+ "sysinfo",
 ]
 
 [[package]]

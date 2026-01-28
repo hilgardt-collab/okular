@@ -1,4 +1,4 @@
-# okular
+# Procular
 
 A modern Linux process monitor built with GTK4 and libadwaita, designed for troubleshooting and monitoring system processes.
 
@@ -58,13 +58,13 @@ sudo dnf install gtk4-devel libadwaita-devel
 
 ```bash
 # Clone the repository
-git clone https://github.com/hilgardt-collab/ocular.git
-cd ocular
+git clone https://github.com/hilgardt-collab/procular.git
+cd procular
 
 # Build release version
 cargo build --release
 
-# The binary will be at target/release/ocular
+# The binary will be at target/release/procular
 ```
 
 ## Running
@@ -74,7 +74,7 @@ cargo build --release
 cargo run --release
 
 # Or run the built binary
-./target/release/ocular
+./target/release/procular
 ```
 
 ## Usage
